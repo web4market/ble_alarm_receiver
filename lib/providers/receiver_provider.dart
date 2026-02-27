@@ -116,7 +116,10 @@ class ReceiverProvider extends ChangeNotifier {
   // Сканирование концентраторов
   Future<void> startScanning() async {
     try {
-      if (_isScanning) return;
+      if (_isScanning) {
+        debugPrint('Сканирование уже выполняется');
+        return;
+      }
 
       final hasPermissions = await requestPermissions();
       if (!hasPermissions) {
@@ -124,44 +127,70 @@ class ReceiverProvider extends ChangeNotifier {
         return;
       }
 
+      // Проверяем Bluetooth
+      var state = await FlutterBluePlus.adapterState.first;
+      if (state != BluetoothAdapterState.on) {
+        debugPrint('Bluetooth выключен');
+        return;
+      }
+
       _discoveredHubs.clear();
       _isScanning = true;
       notifyListeners();
 
-      // Начинаем сканирование и получаем поток
-      final scanStream = FlutterBluePlus.scan();
+      debugPrint('▶️ Запуск сканирования на 10 секунд...');
 
-      // Подписываемся на поток
-      _scanSubscription = scanStream.listen(
-            (scanResult) {
-          if (!_discoveredHubs.any((d) => d.remoteId == scanResult.device.remoteId)) {
-            _discoveredHubs.add(scanResult.device);
-            notifyListeners();
-          }
-        },
-        onError: (e) {
-          debugPrint('Ошибка сканирования: $e');
-        },
+      // Отменяем предыдущее сканирование если было
+      await _scanSubscription?.cancel();
+
+      // Запускаем сканирование
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 10),
       );
 
-      // Останавливаем через 10 секунд
-      Future.delayed(const Duration(seconds: 10), () {
-        _scanSubscription?.cancel();
+      // Слушаем результаты
+      _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
+        for (ScanResult result in results) {
+          if (!_discoveredHubs.any((d) => d.remoteId == result.device.remoteId)) {
+            _discoveredHubs.add(result.device);
+            debugPrint('✅ Найдено: ${result.device.platformName} (${result.rssi} dBm)');
+            notifyListeners();
+          }
+        }
+      }, onError: (e) {
+        debugPrint('❌ Ошибка сканирования: $e');
+      });
+
+      // Слушаем завершение сканирования
+      FlutterBluePlus.isScanning.where((val) => val == false).first.then((_) {
+        debugPrint('⏹️ Сканирование завершено по таймауту');
         _isScanning = false;
         notifyListeners();
       });
 
     } catch (e) {
-      debugPrint('Ошибка сканирования: $e');
+      debugPrint('❌ Ошибка сканирования: $e');
       _isScanning = false;
       notifyListeners();
     }
   }
 
-  void stopScanning() {
-    _scanSubscription?.cancel();
-    _isScanning = false;
-    notifyListeners();
+  Future<void> stopScanning() async {
+    try {
+      if (!_isScanning) {
+        debugPrint('Сканирование не активно');
+        return;
+      }
+
+      await FlutterBluePlus.stopScan();
+      await _scanSubscription?.cancel();
+      _isScanning = false;
+      notifyListeners();
+      debugPrint('⏹️ Сканирование остановлено вручную');
+
+    } catch (e) {
+      debugPrint('Ошибка остановки сканирования: $e');
+    }
   }
 
   // Подключение к концентратору
@@ -203,8 +232,10 @@ class ReceiverProvider extends ChangeNotifier {
               debugPrint('    → Характеристика событий');
 
               // Подписываемся на уведомления
-              await _eventsChar!.setNotifyValue(true);
-              _eventsChar!.lastValueStream.listen(_handleEventData);
+              await _detectorsChar!.setNotifyValue(true);
+              _detectorsChar!.lastValueStream.listen((data) {
+                _handleDetectorsData(data);
+              });
 
             } else if (characteristic.uuid.toString().toUpperCase() == COMMAND_CHAR_UUID.toUpperCase()) {
               _commandChar = characteristic;
@@ -248,7 +279,36 @@ class ReceiverProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+  void _handleDetectorsData(List<int> data) {
+    try {
+      String message = String.fromCharCodes(data);
+      debugPrint('📊 Получены данные извещателей: $message');
 
+      // Парсим список извещателей (формат: id|name|type|status|battery|zone;...)
+      var detectorsData = message.split(';');
+      List<DetectorModel> newDetectors = [];
+
+      for (var detectorStr in detectorsData) {
+        var parts = detectorStr.split('|');
+        if (parts.length >= 6) {
+          newDetectors.add(DetectorModel(
+            id: parts[0],
+            name: parts[1],
+            type: DetectorType.values[int.parse(parts[2])],
+            status: DetectorStatus.values[int.parse(parts[3])],
+            batteryLevel: int.parse(parts[4]),
+            zone: int.parse(parts[5]),
+          ));
+        }
+      }
+
+      // Обновляем список извещателей
+      updateDetectorsFromHub(newDetectors);
+
+    } catch (e) {
+      debugPrint('Ошибка обработки данных извещателей: $e');
+    }
+  }
   // Отключение от концентратора
   Future<void> disconnectFromHub() async {
     try {
