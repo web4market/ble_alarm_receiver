@@ -1,11 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/detector_model.dart';
 import '../models/event_model.dart';
 import '../services/database_service.dart';
-
 
 class ReceiverProvider extends ChangeNotifier {
   bool _isScanning = false;
@@ -21,10 +21,12 @@ class ReceiverProvider extends ChangeNotifier {
   Timer? _connectionMonitorTimer;
 
   // UUID для BLE (должны совпадать с концентратором)
-  static const String SERVICE_UUID = "e0a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c5";
-  static const String DETECTORS_CHAR_UUID = "e1a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c6";
+  static const String SERVICE_UUID = "e911cce0-d5d1-4a04-8d21-8aee86a51ee0";
+  static const String DETECTORS_CHAR_UUID =
+      "e1a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c6";
   static const String EVENTS_CHAR_UUID = "e2a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c7";
-  static const String COMMAND_CHAR_UUID = "e3a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c8";
+  static const String COMMAND_CHAR_UUID =
+      "e3a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c8";
 
   BluetoothCharacteristic? _detectorsChar;
   BluetoothCharacteristic? _eventsChar;
@@ -41,10 +43,14 @@ class ReceiverProvider extends ChangeNotifier {
   // Статистика
   int get totalDetectors => _detectors.length;
   int get activeDetectors => _detectors.where((d) => d.isActive).length;
-  int get alarmDetectors => _detectors.where((d) => d.status == DetectorStatus.alarm).length;
-  int get tamperDetectors => _detectors.where((d) => d.status == DetectorStatus.tamper).length;
-  int get lowBatteryDetectors => _detectors.where((d) => d.status == DetectorStatus.lowBattery).length;
-  int get offlineDetectors => _detectors.where((d) => d.status == DetectorStatus.offline).length;
+  int get alarmDetectors =>
+      _detectors.where((d) => d.status == DetectorStatus.alarm).length;
+  int get tamperDetectors =>
+      _detectors.where((d) => d.status == DetectorStatus.tamper).length;
+  int get lowBatteryDetectors =>
+      _detectors.where((d) => d.status == DetectorStatus.lowBattery).length;
+  int get offlineDetectors =>
+      _detectors.where((d) => d.status == DetectorStatus.offline).length;
   int get unreadEvents => _events.where((e) => !e.isRead).length;
 
   // Инициализация
@@ -62,7 +68,8 @@ class ReceiverProvider extends ChangeNotifier {
 
   // Мониторинг соединения
   void _startConnectionMonitor() {
-    _connectionMonitorTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    _connectionMonitorTimer =
+        Timer.periodic(const Duration(seconds: 30), (timer) {
       _checkDetectorsOffline();
     });
   }
@@ -116,60 +123,39 @@ class ReceiverProvider extends ChangeNotifier {
   // Сканирование концентраторов
   Future<void> startScanning() async {
     try {
-      if (_isScanning) {
-        debugPrint('Сканирование уже выполняется');
-        return;
-      }
-
-      final hasPermissions = await requestPermissions();
-      if (!hasPermissions) {
-        debugPrint('Нет разрешений');
-        return;
-      }
-
-      // Проверяем Bluetooth
-      var state = await FlutterBluePlus.adapterState.first;
-      if (state != BluetoothAdapterState.on) {
-        debugPrint('Bluetooth выключен');
-        return;
-      }
+      if (_isScanning) return;
 
       _discoveredHubs.clear();
       _isScanning = true;
       notifyListeners();
 
-      debugPrint('▶️ Запуск сканирования на 10 секунд...');
+      debugPrint('▶️ Сканирование (без фильтров)...');
 
-      // Отменяем предыдущее сканирование если было
-      await _scanSubscription?.cancel();
-
-      // Запускаем сканирование
+      // Простое сканирование без параметров
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 10),
       );
 
-      // Слушаем результаты
       _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
         for (ScanResult result in results) {
-          if (!_discoveredHubs.any((d) => d.remoteId == result.device.remoteId)) {
+          // Добавляем ВСЕ устройства
+          if (!_discoveredHubs
+              .any((d) => d.remoteId == result.device.remoteId)) {
             _discoveredHubs.add(result.device);
-            debugPrint('✅ Найдено: ${result.device.platformName} (${result.rssi} dBm)');
+            debugPrint('📡 НАЙДЕНО: ${result.device.platformName}');
             notifyListeners();
           }
         }
-      }, onError: (e) {
-        debugPrint('❌ Ошибка сканирования: $e');
       });
 
-      // Слушаем завершение сканирования
       FlutterBluePlus.isScanning.where((val) => val == false).first.then((_) {
-        debugPrint('⏹️ Сканирование завершено по таймауту');
+        debugPrint(
+            '⏹️ Сканирование завершено, найдено: ${_discoveredHubs.length}');
         _isScanning = false;
         notifyListeners();
       });
-
     } catch (e) {
-      debugPrint('❌ Ошибка сканирования: $e');
+      debugPrint('❌ Ошибка: $e');
       _isScanning = false;
       notifyListeners();
     }
@@ -187,7 +173,6 @@ class ReceiverProvider extends ChangeNotifier {
       _isScanning = false;
       notifyListeners();
       debugPrint('⏹️ Сканирование остановлено вручную');
-
     } catch (e) {
       debugPrint('Ошибка остановки сканирования: $e');
     }
@@ -198,62 +183,65 @@ class ReceiverProvider extends ChangeNotifier {
 
   Future<void> connectToHub(BluetoothDevice device) async {
     try {
+      debugPrint('🔄 Подключение к ${device.platformName}...');
+
       _isConnected = false;
       notifyListeners();
 
-      debugPrint('Подключение к ${device.platformName}...');
-
-      // Подключаемся к устройству
       await device.connect(autoConnect: false);
       _connectedHub = device;
 
-      debugPrint('Подключено, ищем сервисы...');
+      debugPrint('✅ Подключено, ищем сервисы...');
 
-      // ЯВНО ЗАПРАШИВАЕМ СЕРВИСЫ
       List<BluetoothService> services = await device.discoverServices();
+      debugPrint('📋 Найдено сервисов: ${services.length}');
 
-      debugPrint('Найдено сервисов: ${services.length}');
+      // Сбрасываем характеристики
+      _detectorsChar = null;
+      _eventsChar = null;
+      _commandChar = null;
 
-      // Ищем нужные сервисы и характеристики
+// Ищем нужные сервисы и характеристики
       for (var service in services) {
-        debugPrint('Сервис: ${service.uuid}');
+        String serviceUuid = service.uuid.toString().toUpperCase();
+        debugPrint('Сервис: $serviceUuid');
 
-        if (service.uuid.toString().toUpperCase() == SERVICE_UUID.toUpperCase()) {
-          debugPrint('Найден нужный сервис!');
+        // ПРОСТОЕ СРАВНЕНИЕ - ищем вхождение ключевой части UUID
+        if (serviceUuid.contains("E0A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C5")) {
+          debugPrint('✅ Найден нужный сервис!');
 
           for (var characteristic in service.characteristics) {
-            debugPrint('  Характеристика: ${characteristic.uuid}');
+            String charUuid = characteristic.uuid.toString().toUpperCase();
+            debugPrint('  Характеристика: $charUuid');
 
-            if (characteristic.uuid.toString().toUpperCase() == DETECTORS_CHAR_UUID.toUpperCase()) {
+            // Простое сравнение по ключевой части
+            if (charUuid.contains("E1A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C6")) {
               _detectorsChar = characteristic;
-              debugPrint('    → Характеристика извещателей');
-            } else if (characteristic.uuid.toString().toUpperCase() == EVENTS_CHAR_UUID.toUpperCase()) {
-              _eventsChar = characteristic;
-              debugPrint('    → Характеристика событий');
-
-              // Подписываемся на уведомления
               await _detectorsChar!.setNotifyValue(true);
-              _detectorsChar!.lastValueStream.listen((data) {
-                _handleDetectorsData(data);
-              });
-
-            } else if (characteristic.uuid.toString().toUpperCase() == COMMAND_CHAR_UUID.toUpperCase()) {
+              _detectorsChar!.lastValueStream.listen(_handleDetectorsData);
+              debugPrint('    ✅ ХАРАКТЕРИСТИКА ИЗВЕЩАТЕЛЕЙ НАЙДЕНА');
+            } else if (charUuid
+                .contains("E2A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C7")) {
+              _eventsChar = characteristic;
+              await _eventsChar!.setNotifyValue(true);
+              _eventsChar!.lastValueStream.listen(_handleEventData);
+              debugPrint('    ✅ ХАРАКТЕРИСТИКА СОБЫТИЙ НАЙДЕНА');
+            } else if (charUuid
+                .contains("E3A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C8")) {
               _commandChar = characteristic;
-              debugPrint('    → Характеристика команд');
+              debugPrint('    ✅ ХАРАКТЕРИСТИКА КОМАНД НАЙДЕНА');
             }
           }
         }
       }
 
-      if (_detectorsChar == null) {
-        debugPrint('ВНИМАНИЕ: Не найдена характеристика извещателей!');
-      }
-      if (_eventsChar == null) {
-        debugPrint('ВНИМАНИЕ: Не найдена характеристика событий!');
-      }
-      if (_commandChar == null) {
-        debugPrint('ВНИМАНИЕ: Не найдена характеристика команд!');
-      }
+      // Проверяем результаты
+      if (_detectorsChar == null)
+        debugPrint('❌ Характеристика извещателей не найдена!');
+      if (_eventsChar == null)
+        debugPrint('❌ Характеристика событий не найдена!');
+      if (_commandChar == null)
+        debugPrint('❌ Характеристика команд не найдена!');
 
       _isConnected = true;
 
@@ -267,22 +255,26 @@ class ReceiverProvider extends ChangeNotifier {
 
       // Запрашиваем список извещателей
       if (_commandChar != null) {
-        await _requestDetectorsList();
+        debugPrint('📡 Запрос списка извещателей...');
+        await _commandChar!.write("GET_DETECTORS".codeUnits);
+      } else {
+        debugPrint(
+            '❌ Не могу запросить извещатели: характеристика команд не найдена');
       }
 
       notifyListeners();
-      debugPrint('Подключение завершено успешно');
-
+      debugPrint('✅ Подключение завершено');
     } catch (e) {
-      debugPrint('Ошибка подключения: $e');
+      debugPrint('❌ Ошибка подключения: $e');
       _isConnected = false;
       notifyListeners();
     }
   }
+
   void _handleDetectorsData(List<int> data) {
     try {
-      String message = String.fromCharCodes(data);
-      debugPrint('📊 Получены данные извещателей: $message');
+      String message = utf8.decode(data);
+      debugPrint('📊 Получены данные: $message');
 
       // Парсим список извещателей (формат: id|name|type|status|battery|zone;...)
       var detectorsData = message.split(';');
@@ -304,11 +296,14 @@ class ReceiverProvider extends ChangeNotifier {
 
       // Обновляем список извещателей
       updateDetectorsFromHub(newDetectors);
-
     } catch (e) {
-      debugPrint('Ошибка обработки данных извещателей: $e');
+      debugPrint('Ошибка декодирования: $e');
+      // Если UTF-8 не работает, пробуем Latin1
+      String message = latin1.decode(data);
+      debugPrint('📊 Latin1: $message');
     }
   }
+
   // Отключение от концентратора
   Future<void> disconnectFromHub() async {
     try {
@@ -336,7 +331,6 @@ class ReceiverProvider extends ChangeNotifier {
       }
 
       notifyListeners();
-
     } catch (e) {
       debugPrint('Ошибка отключения: $e');
     }
@@ -362,7 +356,7 @@ class ReceiverProvider extends ChangeNotifier {
         String description = parts[3];
 
         var detector = _detectors.firstWhere(
-              (d) => d.id == detectorId,
+          (d) => d.id == detectorId,
           orElse: () => DetectorModel(
             id: detectorId,
             name: 'Неизвестный извещатель',
@@ -392,7 +386,6 @@ class ReceiverProvider extends ChangeNotifier {
           description: description,
         ));
       }
-
     } catch (e) {
       debugPrint('Ошибка обработки события: $e');
     }
@@ -526,7 +519,8 @@ class ReceiverProvider extends ChangeNotifier {
       type: EventType.zoneArmed,
       detectorId: 'zone_$zone',
       detectorName: 'Зона $zone',
-      description: 'Зона $zone поставлена на охрану (${zoneDetectors.length} извещателей)',
+      description:
+          'Зона $zone поставлена на охрану (${zoneDetectors.length} извещателей)',
     ));
 
     notifyListeners();
@@ -553,7 +547,8 @@ class ReceiverProvider extends ChangeNotifier {
       type: EventType.zoneDisarmed,
       detectorId: 'zone_$zone',
       detectorName: 'Зона $zone',
-      description: 'Зона $zone снята с охраны (${zoneDetectors.length} извещателей)',
+      description:
+          'Зона $zone снята с охраны (${zoneDetectors.length} извещателей)',
     ));
 
     notifyListeners();
@@ -657,22 +652,27 @@ class ReceiverProvider extends ChangeNotifier {
 
     // Фильтрация
     if (startDate != null) {
-      eventsToExport = eventsToExport.where((e) => e.timestamp.isAfter(startDate)).toList();
+      eventsToExport =
+          eventsToExport.where((e) => e.timestamp.isAfter(startDate)).toList();
     }
     if (endDate != null) {
-      eventsToExport = eventsToExport.where((e) => e.timestamp.isBefore(endDate)).toList();
+      eventsToExport =
+          eventsToExport.where((e) => e.timestamp.isBefore(endDate)).toList();
     }
     if (types != null && types.isNotEmpty) {
-      eventsToExport = eventsToExport.where((e) => types.contains(e.type)).toList();
+      eventsToExport =
+          eventsToExport.where((e) => types.contains(e.type)).toList();
     }
     if (detectorId != null) {
-      eventsToExport = eventsToExport.where((e) => e.detectorId == detectorId).toList();
+      eventsToExport =
+          eventsToExport.where((e) => e.detectorId == detectorId).toList();
     }
 
     String csv = 'Дата,Время,Тип,Извещатель,Описание\n';
 
     for (var event in eventsToExport) {
-      csv += '${event.timestamp.toLocal().year}-${event.timestamp.toLocal().month.toString().padLeft(2, '0')}-${event.timestamp.toLocal().day.toString().padLeft(2, '0')},'
+      csv +=
+          '${event.timestamp.toLocal().year}-${event.timestamp.toLocal().month.toString().padLeft(2, '0')}-${event.timestamp.toLocal().day.toString().padLeft(2, '0')},'
           '${event.timestamp.toLocal().hour.toString().padLeft(2, '0')}:${event.timestamp.toLocal().minute.toString().padLeft(2, '0')}:${event.timestamp.toLocal().second.toString().padLeft(2, '0')},'
           '${_getEventTypeName(event.type)},'
           '${event.detectorName},'
