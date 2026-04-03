@@ -1,17 +1,46 @@
-# ble_alarm_receiver
+# BLE Alarm Receiver
 
-A new Flutter project.
+[![Flutter Version](https://img.shields.io/badge/Flutter-3.22%2B-blue)](https://flutter.dev)
+[![Platform](https://img.shields.io/badge/platform-Android-green)](https://developer.android.com)
 
-## Getting Started
+**BLE Alarm Receiver** — это мобильное приложение для Android, которое превращает ваш смартфон в центральный пульт охранной сигнализации. Оно получает данные по Bluetooth Low Energy (BLE) от концентратора (например, на базе ESP32), отображает состояние датчиков, управляет охраной и ведет подробный журнал событий.
 
-This project is a starting point for a Flutter application.
+Этот проект является частью комплексного решения для систем безопасности и был разработан для компании ZHURIN ELECTRONICS Co.
 
-A few resources to get you started if this is your first Flutter project:
+## ✨ Основные возможности
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+*   **Мониторинг датчиков в реальном времени:** Отображение списка всех подключенных извещателей с их статусом (Норма, Тревога, Вскрытие, Разряд батареи, Нет связи), типом (вибрационный, ИК линейный, ИК объемный), уровнем заряда и временем последней связи.
+*   **Управление системой:** Постановка и снятие с охраны как отдельных датчиков, так и целых зон или всей системы целиком одной кнопкой.
+*   **Обработка тревог:** Мгновенное отображение тревожных событий на экране с возможностью сброса тревоги по одному датчику или всем сразу.
+*   **Журнал событий:** Полная история всех событий (тревоги, вскрытия, разряды батареи, подключения/отключения) с возможностью фильтрации, поиска и экспорта в CSV-файл.
+*   **Статистика и аналитика:** Наглядные графики динамики событий, распределение состояний датчиков и рейтинг наиболее активных извещателей для анализа работы системы.
+*   **Зональное управление:** Группировка датчиков по логическим зонам для удобного управления большими объектами.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🛠️ Технологии
+
+*   **Flutter** — для кроссплатформенной разработки мобильного интерфейса.
+*   **Dart** — основной язык программирования.
+*   **flutter_blue_plus** — для работы с BLE (сканирование, подключение, обмен данными).
+*   **Provider** — для управления состоянием приложения.
+*   **SQFlite** — для локального хранения данных о датчиках и истории событий.
+*   **Flutter Local Notifications** — для отображения системных уведомлений о тревогах.
+
+## 🚀 Начало работы
+
+Эти инструкции помогут вам скопировать проект и запустить его на вашем компьютере для разработки и тестирования.
+
+### Предварительные требования
+
+Убедитесь, что на вашем компьютере установлено следующее ПО:
+
+*   [Git](https://git-scm.com/)
+*   [Flutter SDK](https://docs.flutter.dev/get-started/install) (последняя стабильная версия)
+*   [Android Studio](https://developer.android.com/studio) или VS Code с настроенными плагинами для Flutter/Dart
+*   Android-смартфон с Android 6.0 (API 23) или выше
+
+### Установка и запуск
+
+1.  **Клонируйте репозиторий:**
+    ```bash
+    git clone https://github.com/web4market/ble_alarm_receiver.git
+    cd ble_alarm_receiver
