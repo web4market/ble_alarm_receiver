@@ -346,48 +346,74 @@ class ReceiverProvider extends ChangeNotifier {
   // Обработка данных от извещателей
   void _handleEventData(List<int> data) {
     try {
-      String message = String.fromCharCodes(data);
-      var parts = message.split('|');
+      String message = utf8.decode(data);
+      debugPrint('📨 Получено событие: $message');
 
+      var parts = message.split('|');
       if (parts.length >= 4) {
-        DateTime timestamp = DateTime.parse(parts[0]);
-        EventType type = EventType.values[int.parse(parts[1])];
+        // timestamp от ESP32 - это просто число (миллисекунды)
+        // Не парсим его как дату, а используем как есть или создаем текущее время
+        DateTime timestamp = DateTime.now(); // Используем текущее время
+
+        int eventType = int.tryParse(parts[1]) ?? -1;
         String detectorId = parts[2];
         String description = parts[3];
 
-        var detector = _detectors.firstWhere(
-          (d) => d.id == detectorId,
-          orElse: () => DetectorModel(
-            id: detectorId,
-            name: 'Неизвестный извещатель',
-            type: DetectorType.vibration,
-          ),
-        );
+        debugPrint(
+            '   Тип: $eventType, Датчик: $detectorId, Описание: $description');
 
-        // Обновляем статус извещателя
-        if (type == EventType.alarm) {
-          detector.status = DetectorStatus.alarm;
-          detector.alarmCount++;
-        } else if (type == EventType.tamper) {
-          detector.status = DetectorStatus.tamper;
-        } else if (type == EventType.lowBattery) {
-          detector.status = DetectorStatus.lowBattery;
-        } else if (type == EventType.restored) {
-          detector.status = DetectorStatus.normal;
+        // Добавляем событие в журнал
+        EventType type;
+        switch (eventType) {
+          case 0:
+            type = EventType.alarm;
+            break;
+          case 1:
+            type = EventType.connected;
+            break;
+          case 2:
+            type = EventType.disconnected;
+            break;
+          case 3:
+            type = EventType.restored;
+            break;
+          default:
+            type = EventType.alarm;
         }
-
-        detector.lastSeen = timestamp;
 
         _addEvent(EventModel(
           timestamp: timestamp,
           type: type,
           detectorId: detectorId,
-          detectorName: detector.name,
+          detectorName: detectorId == 'system' ? 'Система' : detectorId,
           description: description,
         ));
+
+        // Если это тревога (type 0) и не системная
+        if (eventType == 0 && detectorId != 'system') {
+          // Обновляем статус датчика
+          int index = _detectors.indexWhere((d) => d.id == detectorId);
+          if (index >= 0) {
+            _detectors[index].status = DetectorStatus.alarm;
+            _detectors[index].alarmCount++;
+            debugPrint('🚨 Тревога на датчике: ${_detectors[index].name}');
+            notifyListeners();
+          }
+        }
+
+        // Если сброс тревоги (type 3)
+        if (eventType == 3 && detectorId != 'system') {
+          int index = _detectors.indexWhere((d) => d.id == detectorId);
+          if (index >= 0) {
+            _detectors[index].status = DetectorStatus.normal;
+            debugPrint('✅ Сброс тревоги на датчике: ${_detectors[index].name}');
+            notifyListeners();
+          }
+        }
       }
     } catch (e) {
-      debugPrint('Ошибка обработки события: $e');
+      debugPrint('❌ Ошибка обработки события: $e');
+      debugPrint('   Сырые данные: $data');
     }
   }
 
