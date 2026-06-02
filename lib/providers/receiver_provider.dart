@@ -209,7 +209,7 @@ class ReceiverProvider extends ChangeNotifier {
   }
 
   // Подключение к концентратору
-  // В классе ReceiverProvider
+  //// В классе ReceiverProvider
 
   Future<void> connectToHub(BluetoothDevice device) async {
     try {
