@@ -28,6 +28,13 @@ class ReceiverProvider extends ChangeNotifier {
   static const String COMMAND_CHAR_UUID =
       "e3a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c8";
 
+  static const List<String> TARGET_DEVICE_NAMES = [
+    "BLE Alarm Hub",
+    "Alarm Hub",
+    "ESP32 Alarm",
+    "Security Hub"
+  ];
+
   BluetoothCharacteristic? _detectorsChar;
   BluetoothCharacteristic? _eventsChar;
   BluetoothCharacteristic? _commandChar;
@@ -138,12 +145,35 @@ class ReceiverProvider extends ChangeNotifier {
 
       _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
         for (ScanResult result in results) {
-          // Добавляем ВСЕ устройства
-          if (!_discoveredHubs
-              .any((d) => d.remoteId == result.device.remoteId)) {
+          // Фильтруем только устройства с нашим именем или UUID сервиса
+          // bool isOurHub = false;
+          bool isOurHub =
+              TARGET_DEVICE_NAMES.contains(result.device.platformName);
+
+          // Проверка по имени устройства
+          if (result.device.platformName == "BLE Alarm Hub") {
+            isOurHub = true;
+          }
+
+          // Проверка по UUID сервиса (если имя по какой-то причине не совпадает)
+          if (result.advertisementData.serviceUuids
+              .contains(Guid(SERVICE_UUID))) {
+            isOurHub = true;
+          }
+
+          // Добавляем только наше устройство
+          if (isOurHub &&
+              !_discoveredHubs
+                  .any((d) => d.remoteId == result.device.remoteId)) {
             _discoveredHubs.add(result.device);
-            debugPrint('📡 НАЙДЕНО: ${result.device.platformName}');
+            debugPrint('📡 НАЙДЕН КОНЦЕНТРАТОР: ${result.device.platformName}');
             notifyListeners();
+
+            // Опционально: автоматически останавливаем сканирование после нахождения
+            stopScanning();
+
+            // Автоматически подключаемся
+            connectToHub(result.device);
           }
         }
       });
