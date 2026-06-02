@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../providers/receiver_provider.dart';
 import 'detectors_screen.dart';
 import 'events_screen.dart';
@@ -19,6 +20,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    WakelockPlus.enable();
     return Scaffold(
       appBar: AppBar(
         title: const Text('BLE Приемник сигналов'),
@@ -31,7 +33,8 @@ class _MainScreenState extends State<MainScreen> {
                 children: [
                   if (provider.isConnected)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.green,
                         borderRadius: BorderRadius.circular(12),
@@ -168,9 +171,12 @@ class _MainScreenState extends State<MainScreen> {
                 const SizedBox(height: 16),
                 if (provider.isConnected) ...[
                   ListTile(
-                    leading: const Icon(Icons.bluetooth_connected, color: Colors.green),
-                    title: Text('Подключено к ${provider.connectedHub?.platformName ?? 'концентратору'}'),
-                    subtitle: Text('ID: ${provider.connectedHub?.remoteId ?? ''}'),
+                    leading: const Icon(Icons.bluetooth_connected,
+                        color: Colors.green),
+                    title: Text(
+                        'Подключено к ${provider.connectedHub?.platformName ?? 'концентратору'}'),
+                    subtitle:
+                        Text('ID: ${provider.connectedHub?.remoteId ?? ''}'),
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
@@ -219,8 +225,11 @@ class _MainScreenState extends State<MainScreen> {
                         return Card(
                           margin: const EdgeInsets.symmetric(vertical: 4),
                           child: ListTile(
-                            leading: const Icon(Icons.hub, color: Colors.deepPurple),
-                            title: Text(hub.platformName.isNotEmpty ? hub.platformName : 'Концентратор'),
+                            leading:
+                                const Icon(Icons.hub, color: Colors.deepPurple),
+                            title: Text(hub.platformName.isNotEmpty
+                                ? hub.platformName
+                                : 'Концентратор'),
                             subtitle: Text(hub.remoteId.toString()),
                             trailing: ElevatedButton(
                               onPressed: () {

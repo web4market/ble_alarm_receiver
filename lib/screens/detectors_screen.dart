@@ -63,7 +63,8 @@ class DetectorsScreen extends StatelessWidget {
             _buildStatChip('Всего', provider.totalDetectors, Colors.blue),
             _buildStatChip('Тревога', provider.alarmDetectors, Colors.red),
             _buildStatChip('Вскрытие', provider.tamperDetectors, Colors.purple),
-            _buildStatChip('Разряд', provider.lowBatteryDetectors, Colors.orange),
+            _buildStatChip(
+                'Разряд', provider.lowBatteryDetectors, Colors.orange),
             _buildStatChip('Нет связи', provider.offlineDetectors, Colors.grey),
           ],
         ),
@@ -108,7 +109,8 @@ class DetectorsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildDetectorCard(DetectorModel detector, ReceiverProvider provider, BuildContext context) {
+  Widget _buildDetectorCard(
+      DetectorModel detector, ReceiverProvider provider, BuildContext context) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Theme(
@@ -128,7 +130,8 @@ class DetectorsScreen extends StatelessWidget {
               ),
               if (!detector.isArmed)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: Colors.grey.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(4),
@@ -146,7 +149,8 @@ class DetectorsScreen extends StatelessWidget {
               Text('ID: ${detector.id} | Зона: ${detector.zone}'),
               Row(
                 children: [
-                  Icon(Icons.battery_full, size: 16, color: detector.batteryColor),
+                  Icon(Icons.battery_full,
+                      size: 16, color: detector.batteryColor),
                   const SizedBox(width: 4),
                   Text('${detector.batteryLevel}%'),
                   const SizedBox(width: 12),
@@ -188,13 +192,14 @@ class DetectorsScreen extends StatelessWidget {
                         label: 'Сброс тревоги',
                         color: Colors.orange,
                         onPressed: detector.status == DetectorStatus.alarm ||
-                            detector.status == DetectorStatus.tamper
+                                detector.status == DetectorStatus.tamper
                             ? () => provider.disarmDetectorAlarm(detector.id)
                             : null,
                       ),
                       _buildActionButton(
                         icon: Icons.security,
-                        label: detector.isArmed ? 'Снять с охраны' : 'Поставить',
+                        label:
+                            detector.isArmed ? 'Снять с охраны' : 'Поставить',
                         color: detector.isArmed ? Colors.orange : Colors.green,
                         onPressed: () {
                           if (detector.isArmed) {
@@ -208,7 +213,8 @@ class DetectorsScreen extends StatelessWidget {
                         icon: Icons.info,
                         label: 'Детали',
                         color: Colors.blue,
-                        onPressed: () => _showDetectorDetails(context, detector),
+                        onPressed: () =>
+                            _showDetectorDetails(context, detector),
                       ),
                     ],
                   ),
@@ -239,7 +245,9 @@ class DetectorsScreen extends StatelessWidget {
       children: [
         Container(
           decoration: BoxDecoration(
-            color: onPressed != null ? color.withOpacity(0.2) : Colors.grey.withOpacity(0.1),
+            color: onPressed != null
+                ? color.withOpacity(0.2)
+                : Colors.grey.withOpacity(0.1),
             shape: BoxShape.circle,
           ),
           child: IconButton(
@@ -287,16 +295,18 @@ class DetectorsScreen extends StatelessWidget {
               _buildDetailRow('ID', detector.id),
               _buildDetailRow('Тип', _getTypeName(detector.type)),
               _buildDetailRow('Зона', '${detector.zone}'),
-              _buildDetailRow('Статус', detector.statusText, color: detector.statusColor),
+              _buildDetailRow('Статус', detector.statusText,
+                  color: detector.statusColor),
               _buildDetailRow('Батарея', '${detector.batteryLevel}%'),
-              _buildDetailRow('Последняя связь', _formatDateTime(detector.lastSeen)),
+              _buildDetailRow(
+                  'Последняя связь', _formatDateTime(detector.lastSeen)),
               _buildDetailRow('Срабатываний', '${detector.alarmCount}'),
               if (detector.parameters.isNotEmpty) ...[
                 const Divider(),
-                const Text('Параметры:', style: TextStyle(fontWeight: FontWeight.bold)),
-                ...detector.parameters.entries.map((e) =>
-                    _buildDetailRow(e.key, e.value.toString())
-                ),
+                const Text('Параметры:',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                ...detector.parameters.entries
+                    .map((e) => _buildDetailRow(e.key, e.value.toString())),
               ],
             ],
           ),
@@ -318,7 +328,8 @@ class DetectorsScreen extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text('$label:', style: const TextStyle(color: Colors.grey)),
-          Text(value, style: TextStyle(color: color, fontWeight: FontWeight.w500)),
+          Text(value,
+              style: TextStyle(color: color, fontWeight: FontWeight.w500)),
         ],
       ),
     );
