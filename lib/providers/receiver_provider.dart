@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -21,7 +20,7 @@ class ReceiverProvider extends ChangeNotifier {
   Timer? _connectionMonitorTimer;
 
   // UUID для BLE (должны совпадать с концентратором)
-  static const String SERVICE_UUID = "e911cce0-d5d1-4a04-8d21-8aee86a51ee0";
+  static const String SERVICE_UUID = "e0a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c5";
   static const String DETECTORS_CHAR_UUID =
       "e1a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c6";
   static const String EVENTS_CHAR_UUID = "e2a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c7";
@@ -301,37 +300,84 @@ class ReceiverProvider extends ChangeNotifier {
     }
   }
 
-  void _handleDetectorsData(List<int> data) {
-    try {
-      String message = utf8.decode(data);
-      debugPrint('📊 Получены данные: $message');
+  // ========== ПАРСИНГ 16-БАЙТНОГО ПАКЕТА СПЛАВ ==========
 
-      // Парсим список извещателей (формат: id|name|type|status|battery|zone;...)
-      var detectorsData = message.split(';');
-      List<DetectorModel> newDetectors = [];
+  // Проверка CRC: сумма байт 0..14 mod 256
+  bool _checkCRC(List<int> pkt) {
+    int sum = 0;
+    for (int i = 0; i < 15; i++) sum = (sum + pkt[i]) & 0xFF;
+    return sum == pkt[15];
+  }
 
-      for (var detectorStr in detectorsData) {
-        var parts = detectorStr.split('|');
-        if (parts.length >= 6) {
-          newDetectors.add(DetectorModel(
-            id: parts[0],
-            name: parts[1],
-            type: DetectorType.values[int.parse(parts[2])],
-            status: DetectorStatus.values[int.parse(parts[3])],
-            batteryLevel: int.parse(parts[4]),
-            zone: int.parse(parts[5]),
-          ));
-        }
-      }
+  // Перевод даты пакета (байт 13) в DateTime
+  DateTime _packetTimestamp(int h, int m, int s, int daysSince2000) {
+    final base = DateTime.utc(2000, 1, 1);
+    final date = base.add(Duration(days: daysSince2000));
+    return DateTime(date.year, date.month, date.day, h, m, s);
+  }
 
-      // Обновляем список извещателей
-      updateDetectorsFromHub(newDetectors);
-    } catch (e) {
-      debugPrint('Ошибка декодирования: $e');
-      // Если UTF-8 не работает, пробуем Latin1
-      String message = latin1.decode(data);
-      debugPrint('📊 Latin1: $message');
+  // Код события → DetectorStatus
+  DetectorStatus _eventCodeToStatus(int code) {
+    switch (code) {
+      case 0x55: return DetectorStatus.alarm;
+      case 0xA8: return DetectorStatus.lowBattery;
+      case 0x58: return DetectorStatus.tamper;
+      case 0xAB: return DetectorStatus.normal; // выкл
+      default:   return DetectorStatus.normal;
     }
+  }
+
+  // Код события → EventType
+  EventType _eventCodeToEventType(int code) {
+    switch (code) {
+      case 0x55: return EventType.alarm;
+      case 0xA8: return EventType.lowBattery;
+      case 0x58: return EventType.tamper;
+      case 0xA9: return EventType.connected;
+      case 0xAB: return EventType.disconnected;
+      case 0xAA: return EventType.restored;
+      default:   return EventType.restored;
+    }
+  }
+
+  void _handleDetectorsData(List<int> data) {
+    if (data.length != 16) {
+      debugPrint('Неверная длина пакета: ${data.length}');
+      return;
+    }
+    if (!_checkCRC(data)) {
+      debugPrint('Ошибка CRC пакета');
+      return;
+    }
+
+    final nodeId   = DetectorModel.nodeId(data[0], data[1]);
+    final evtCode  = data[4];
+    final nodeType = data[9];
+    final ts       = _packetTimestamp(data[10], data[11], data[12], data[13]);
+    final status   = _eventCodeToStatus(evtCode);
+
+    debugPrint('Пакет узла $nodeId код ${evtCode.toRadixString(16)} статус $status');
+
+    final existingIndex = _detectors.indexWhere((d) => d.id == nodeId);
+    if (existingIndex >= 0) {
+      _detectors[existingIndex] = _detectors[existingIndex].copyWith(
+        status: status,
+        lastSeen: ts,
+        isActive: true,
+      );
+    } else {
+      _detectors.add(DetectorModel(
+        id: nodeId,
+        name: DetectorModel.nameFromNodeType(nodeType, nodeId),
+        type: DetectorModel.typeFromNodeType(nodeType),
+        nodeType: nodeType,
+        status: status,
+        lastSeen: ts,
+      ));
+    }
+
+    _db.saveDetectors(_detectors);
+    notifyListeners();
   }
 
   // Отключение от концентратора
@@ -373,77 +419,68 @@ class ReceiverProvider extends ChangeNotifier {
     }
   }
 
-  // Обработка данных от извещателей
   void _handleEventData(List<int> data) {
-    try {
-      String message = utf8.decode(data);
-      debugPrint('📨 Получено событие: $message');
+    if (data.length != 16) {
+      debugPrint('Неверная длина пакета события: ${data.length}');
+      return;
+    }
+    if (!_checkCRC(data)) {
+      debugPrint('Ошибка CRC пакета события');
+      return;
+    }
 
-      var parts = message.split('|');
-      if (parts.length >= 4) {
-        // timestamp от ESP32 - это просто число (миллисекунды)
-        // Не парсим его как дату, а используем как есть или создаем текущее время
-        DateTime timestamp = DateTime.now(); // Используем текущее время
+    final nodeId   = DetectorModel.nodeId(data[0], data[1]);
+    final evtCode  = data[4];
+    final nodeType = data[9];
+    final ts       = _packetTimestamp(data[10], data[11], data[12], data[13]);
+    final evtType  = _eventCodeToEventType(evtCode);
+    final status   = _eventCodeToStatus(evtCode);
 
-        int eventType = int.tryParse(parts[1]) ?? -1;
-        String detectorId = parts[2];
-        String description = parts[3];
+    final existingDetector = _detectors.firstWhere(
+      (d) => d.id == nodeId,
+      orElse: () => DetectorModel(
+        id: nodeId,
+        name: DetectorModel.nameFromNodeType(nodeType, nodeId),
+        type: DetectorModel.typeFromNodeType(nodeType),
+        nodeType: nodeType,
+      ),
+    );
 
-        debugPrint(
-            '   Тип: $eventType, Датчик: $detectorId, Описание: $description');
+    debugPrint('Событие узла $nodeId код ${evtCode.toRadixString(16)} тип $evtType');
 
-        // Добавляем событие в журнал
-        EventType type;
-        switch (eventType) {
-          case 0:
-            type = EventType.alarm;
-            break;
-          case 1:
-            type = EventType.connected;
-            break;
-          case 2:
-            type = EventType.disconnected;
-            break;
-          case 3:
-            type = EventType.restored;
-            break;
-          default:
-            type = EventType.alarm;
-        }
+    _addEvent(EventModel(
+      timestamp: ts,
+      type: evtType,
+      detectorId: nodeId,
+      detectorName: existingDetector.name,
+      description: _eventDescription(evtCode, existingDetector.name),
+    ));
 
-        _addEvent(EventModel(
-          timestamp: timestamp,
-          type: type,
-          detectorId: detectorId,
-          detectorName: detectorId == 'system' ? 'Система' : detectorId,
-          description: description,
-        ));
+    // Обновляем статус датчика в списке
+    final index = _detectors.indexWhere((d) => d.id == nodeId);
+    if (index >= 0) {
+      _detectors[index] = _detectors[index].copyWith(
+        status: status,
+        lastSeen: ts,
+        alarmCount: evtCode == 0x55
+            ? _detectors[index].alarmCount + 1
+            : _detectors[index].alarmCount,
+      );
+      notifyListeners();
+    }
+  }
 
-        // Если это тревога (type 0) и не системная
-        if (eventType == 0 && detectorId != 'system') {
-          // Обновляем статус датчика
-          int index = _detectors.indexWhere((d) => d.id == detectorId);
-          if (index >= 0) {
-            _detectors[index].status = DetectorStatus.alarm;
-            _detectors[index].alarmCount++;
-            debugPrint('🚨 Тревога на датчике: ${_detectors[index].name}');
-            notifyListeners();
-          }
-        }
-
-        // Если сброс тревоги (type 3)
-        if (eventType == 3 && detectorId != 'system') {
-          int index = _detectors.indexWhere((d) => d.id == detectorId);
-          if (index >= 0) {
-            _detectors[index].status = DetectorStatus.normal;
-            debugPrint('✅ Сброс тревоги на датчике: ${_detectors[index].name}');
-            notifyListeners();
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Ошибка обработки события: $e');
-      debugPrint('   Сырые данные: $data');
+  String _eventDescription(int evtCode, String name) {
+    switch (evtCode) {
+      case 0x55: return 'ТРЕВОГА: $name';
+      case 0xAA: return 'Норма: $name';
+      case 0xA8: return 'Разряд батареи: $name';
+      case 0x58: return 'Вскрытие корпуса: $name';
+      case 0xA9: return 'Включение: $name';
+      case 0xAB: return 'Выключение: $name';
+      case 0xB9: return 'Система включена';
+      case 0xBA: return 'Система выключена';
+      default:   return 'Событие ${evtCode.toRadixString(16).toUpperCase()}: $name';
     }
   }
 
