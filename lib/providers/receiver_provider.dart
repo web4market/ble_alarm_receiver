@@ -135,43 +135,36 @@ class ReceiverProvider extends ChangeNotifier {
       _isScanning = true;
       notifyListeners();
 
-      debugPrint('▶️ Сканирование (без фильтров)...');
+      debugPrint('▶️ Сканирование (без фильтров, 15 сек)...');
 
-      // Простое сканирование без параметров
       await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 10),
+        timeout: const Duration(seconds: 15),
+        androidUsesFineLocation: false,
       );
 
       _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
         for (ScanResult result in results) {
-          // Фильтруем только устройства с нашим именем или UUID сервиса
-          // bool isOurHub = false;
-          bool isOurHub =
-              TARGET_DEVICE_NAMES.contains(result.device.platformName);
+          // На Android platformName часто пуст во время скана —
+          // реальное имя приходит в advertisementData.localName
+          final localName    = result.advertisementData.localName;
+          final platformName = result.device.platformName;
+          final deviceName   = localName.isNotEmpty ? localName : platformName;
 
-          // Проверка по имени устройства
-          if (result.device.platformName == "BLE Alarm Hub") {
-            isOurHub = true;
-          }
+          debugPrint('BLE: "$deviceName" rssi=${result.rssi}');
 
-          // Проверка по UUID сервиса (если имя по какой-то причине не совпадает)
-          if (result.advertisementData.serviceUuids
-              .contains(Guid(SERVICE_UUID))) {
-            isOurHub = true;
-          }
+          final bool isOurHub =
+              TARGET_DEVICE_NAMES.contains(deviceName) ||
+              result.advertisementData.serviceUuids
+                  .any((u) => u.toString().toUpperCase()
+                      .contains('E0A1B2C3'));
 
-          // Добавляем только наше устройство
           if (isOurHub &&
-              !_discoveredHubs
-                  .any((d) => d.remoteId == result.device.remoteId)) {
+              !_discoveredHubs.any((d) => d.remoteId == result.device.remoteId)) {
             _discoveredHubs.add(result.device);
-            debugPrint('📡 НАЙДЕН КОНЦЕНТРАТОР: ${result.device.platformName}');
+            debugPrint('✅ НАЙДЕН КОНЦЕНТРАТОР: "$deviceName" (${result.device.remoteId})');
             notifyListeners();
 
-            // Опционально: автоматически останавливаем сканирование после нахождения
             stopScanning();
-
-            // Автоматически подключаемся
             connectToHub(result.device);
           }
         }
@@ -300,34 +293,29 @@ class ReceiverProvider extends ChangeNotifier {
     }
   }
 
-  // ========== ПАРСИНГ 16-БАЙТНОГО ПАКЕТА СПЛАВ ==========
+  // ========== ПАРСИНГ 6-БАЙТНОГО ПАКЕТА ==========
+  // [0] ID_HI  [1] ID_LO  [2] CHANNEL(0x22)
+  // [3] eventCode  [4] RESERVED(0x33)  [5] nodeType
 
-  // Проверка CRC: сумма байт 0..14 mod 256
-  bool _checkCRC(List<int> pkt) {
-    int sum = 0;
-    for (int i = 0; i < 15; i++) sum = (sum + pkt[i]) & 0xFF;
-    return sum == pkt[15];
-  }
+  static const int _channel  = 0x22;
+  static const int _reserved = 0x33;
 
-  // Перевод даты пакета (байт 13) в DateTime
-  DateTime _packetTimestamp(int h, int m, int s, int daysSince2000) {
-    final base = DateTime.utc(2000, 1, 1);
-    final date = base.add(Duration(days: daysSince2000));
-    return DateTime(date.year, date.month, date.day, h, m, s);
-  }
-
-  // Код события → DetectorStatus
-  DetectorStatus _eventCodeToStatus(int code) {
-    switch (code) {
-      case 0x55: return DetectorStatus.alarm;
-      case 0xA8: return DetectorStatus.lowBattery;
-      case 0x58: return DetectorStatus.tamper;
-      case 0xAB: return DetectorStatus.normal; // выкл
-      default:   return DetectorStatus.normal;
+  bool _validatePacket(List<int> pkt) {
+    if (pkt.length != 6) {
+      debugPrint('Неверная длина пакета: ${pkt.length}');
+      return false;
     }
+    if (pkt[2] != _channel) {
+      debugPrint('Неверный канал: 0x${pkt[2].toRadixString(16)}');
+      return false;
+    }
+    if (pkt[4] != _reserved) {
+      debugPrint('Неверный резервный байт: 0x${pkt[4].toRadixString(16)}');
+      return false;
+    }
+    return true;
   }
 
-  // Код события → EventType
   EventType _eventCodeToEventType(int code) {
     switch (code) {
       case 0x55: return EventType.alarm;
@@ -336,44 +324,43 @@ class ReceiverProvider extends ChangeNotifier {
       case 0xA9: return EventType.connected;
       case 0xAB: return EventType.disconnected;
       case 0xAA: return EventType.restored;
+      case 0xAC: return EventType.restored;
+      case 0xA4: return EventType.restored;
       default:   return EventType.restored;
     }
   }
 
+  String _eventDescription(int evtCode, String name) {
+    switch (evtCode) {
+      case 0x55: return 'ТРЕВОГА: $name';
+      case 0xAA: return 'Контрольный сигнал: $name';
+      case 0xA8: return 'Разряд батареи: $name';
+      case 0x58: return 'Вскрытие корпуса: $name';
+      case 0xA9: return 'Включение: $name';
+      case 0xAB: return 'Выключение: $name';
+      case 0xAC: return 'Напряжение: $name';
+      case 0xA4: return 'Режим чувствительности: $name';
+      default:   return 'Событие 0x${evtCode.toRadixString(16).toUpperCase()}: $name';
+    }
+  }
+
   void _handleDetectorsData(List<int> data) {
-    if (data.length != 16) {
-      debugPrint('Неверная длина пакета: ${data.length}');
-      return;
-    }
-    if (!_checkCRC(data)) {
-      debugPrint('Ошибка CRC пакета');
-      return;
-    }
+    if (!_validatePacket(data)) return;
 
-    final nodeId   = DetectorModel.nodeId(data[0], data[1]);
-    final evtCode  = data[4];
-    final nodeType = data[9];
-    final ts       = _packetTimestamp(data[10], data[11], data[12], data[13]);
-    final status   = _eventCodeToStatus(evtCode);
+    final detector = DetectorModel.fromPacket(data);
+    final detId = DetectorModel.idFromPacket(data);
+    debugPrint('Пакет датчика $detId (${detector.name}) статус ${detector.status}');
 
-    debugPrint('Пакет узла $nodeId код ${evtCode.toRadixString(16)} статус $status');
-
-    final existingIndex = _detectors.indexWhere((d) => d.id == nodeId);
-    if (existingIndex >= 0) {
-      _detectors[existingIndex] = _detectors[existingIndex].copyWith(
-        status: status,
-        lastSeen: ts,
-        isActive: true,
+    final idx = _detectors.indexWhere((d) => d.id == detId);
+    if (idx >= 0) {
+      _detectors[idx] = _detectors[idx].copyWith(
+        status:        detector.status,
+        lastSeen:      DateTime.now(),
+        isActive:      true,
+        lastEventCode: data[3],
       );
     } else {
-      _detectors.add(DetectorModel(
-        id: nodeId,
-        name: DetectorModel.nameFromNodeType(nodeType, nodeId),
-        type: DetectorModel.typeFromNodeType(nodeType),
-        nodeType: nodeType,
-        status: status,
-        lastSeen: ts,
-      ));
+      _detectors.add(detector);
     }
 
     _db.saveDetectors(_detectors);
@@ -420,67 +407,37 @@ class ReceiverProvider extends ChangeNotifier {
   }
 
   void _handleEventData(List<int> data) {
-    if (data.length != 16) {
-      debugPrint('Неверная длина пакета события: ${data.length}');
-      return;
-    }
-    if (!_checkCRC(data)) {
-      debugPrint('Ошибка CRC пакета события');
-      return;
-    }
+    if (!_validatePacket(data)) return;
 
-    final nodeId   = DetectorModel.nodeId(data[0], data[1]);
-    final evtCode  = data[4];
-    final nodeType = data[9];
-    final ts       = _packetTimestamp(data[10], data[11], data[12], data[13]);
+    final evtCode  = data[3];
+    final nodeType = data[5];
     final evtType  = _eventCodeToEventType(evtCode);
-    final status   = _eventCodeToStatus(evtCode);
+    final detId    = DetectorModel.idFromPacket(data);
+    final detName  = DetectorModel.nameFromNodeType(nodeType);
 
-    final existingDetector = _detectors.firstWhere(
-      (d) => d.id == nodeId,
-      orElse: () => DetectorModel(
-        id: nodeId,
-        name: DetectorModel.nameFromNodeType(nodeType, nodeId),
-        type: DetectorModel.typeFromNodeType(nodeType),
-        nodeType: nodeType,
-      ),
-    );
-
-    debugPrint('Событие узла $nodeId код ${evtCode.toRadixString(16)} тип $evtType');
+    debugPrint('Событие $detId ($detName) код 0x${evtCode.toRadixString(16).toUpperCase()} → $evtType');
 
     _addEvent(EventModel(
-      timestamp: ts,
+      timestamp: DateTime.now(),
       type: evtType,
-      detectorId: nodeId,
-      detectorName: existingDetector.name,
-      description: _eventDescription(evtCode, existingDetector.name),
+      detectorId: detId,
+      detectorName: '$detName [$detId]',
+      description: _eventDescription(evtCode, '$detName [$detId]'),
     ));
 
     // Обновляем статус датчика в списке
-    final index = _detectors.indexWhere((d) => d.id == nodeId);
-    if (index >= 0) {
-      _detectors[index] = _detectors[index].copyWith(
-        status: status,
-        lastSeen: ts,
-        alarmCount: evtCode == 0x55
-            ? _detectors[index].alarmCount + 1
-            : _detectors[index].alarmCount,
+    final idx = _detectors.indexWhere((d) => d.id == detId);
+    if (idx >= 0) {
+      final newStatus = DetectorModel.statusFromEventCode(evtCode);
+      _detectors[idx] = _detectors[idx].copyWith(
+        status:        newStatus,
+        lastSeen:      DateTime.now(),
+        lastEventCode: evtCode,
+        alarmCount:    evtCode == 0x55
+            ? _detectors[idx].alarmCount + 1
+            : _detectors[idx].alarmCount,
       );
       notifyListeners();
-    }
-  }
-
-  String _eventDescription(int evtCode, String name) {
-    switch (evtCode) {
-      case 0x55: return 'ТРЕВОГА: $name';
-      case 0xAA: return 'Норма: $name';
-      case 0xA8: return 'Разряд батареи: $name';
-      case 0x58: return 'Вскрытие корпуса: $name';
-      case 0xA9: return 'Включение: $name';
-      case 0xAB: return 'Выключение: $name';
-      case 0xB9: return 'Система включена';
-      case 0xBA: return 'Система выключена';
-      default:   return 'Событие ${evtCode.toRadixString(16).toUpperCase()}: $name';
     }
   }
 
@@ -702,35 +659,6 @@ class ReceiverProvider extends ChangeNotifier {
       description: 'Система снята с охраны ($count извещателей)',
     ));
 
-    notifyListeners();
-  }
-
-  // Обновить извещатели из данных концентратора
-  Future<void> updateDetectorsFromHub(List<DetectorModel> newDetectors) async {
-    // Обновляем существующие или добавляем новые
-    for (var newDetector in newDetectors) {
-      var existingIndex = _detectors.indexWhere((d) => d.id == newDetector.id);
-
-      if (existingIndex >= 0) {
-        // Сохраняем состояние охраны
-        newDetector.isArmed = _detectors[existingIndex].isArmed;
-        _detectors[existingIndex] = newDetector;
-      } else {
-        _detectors.add(newDetector);
-      }
-    }
-
-    // Отмечаем отсутствующие как неактивные
-    for (var detector in _detectors) {
-      if (!newDetectors.any((d) => d.id == detector.id)) {
-        detector.isActive = false;
-        detector.status = DetectorStatus.offline;
-      } else {
-        detector.isActive = true;
-      }
-    }
-
-    await _db.saveDetectors(_detectors);
     notifyListeners();
   }
 

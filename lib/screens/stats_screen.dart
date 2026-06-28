@@ -286,9 +286,10 @@ class StatsScreen extends StatelessWidget {
   }
 
   Widget _buildBatteryStats(ReceiverProvider provider) {
-    int good = provider.detectors.where((d) => d.batteryLevel > 60).length;
-    int medium = provider.detectors.where((d) => d.batteryLevel <= 60 && d.batteryLevel > 20).length;
-    int low = provider.detectors.where((d) => d.batteryLevel <= 20).length;
+    // Протокол не передаёт уровень заряда; считаем по событию EVT_BATTERY (0xA8)
+    int good   = provider.detectors.where((d) => d.status != DetectorStatus.lowBattery && d.isActive).length;
+    int medium = 0;
+    int low    = provider.detectors.where((d) => d.status == DetectorStatus.lowBattery).length;
 
     return Card(
       elevation: 4,

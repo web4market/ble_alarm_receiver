@@ -146,19 +146,47 @@ class DetectorsScreen extends StatelessWidget {
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('ID: ${detector.id} | Зона: ${detector.zone}'),
               Row(
                 children: [
-                  Icon(Icons.battery_full,
-                      size: 16, color: detector.batteryColor),
+                  Text(
+                    'ID: ${detector.id}',
+                    style: const TextStyle(
+                        fontFamily: 'monospace', fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.blueGrey.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      detector.name,
+                      style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Зона: ${detector.zone}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  Icon(Icons.history, size: 14, color: Colors.grey.shade500),
                   const SizedBox(width: 4),
-                  Text('${detector.batteryLevel}%'),
-                  const SizedBox(width: 12),
-                  Icon(Icons.access_time, size: 16, color: Colors.grey),
+                  Text(
+                    detector.lastEventText,
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(width: 10),
+                  Icon(Icons.access_time, size: 14, color: Colors.grey.shade500),
                   const SizedBox(width: 4),
                   Text(
                     _formatLastSeen(detector.lastSeen),
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                   ),
                 ],
               ),
@@ -293,21 +321,16 @@ class DetectorsScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildDetailRow('ID', detector.id),
-              _buildDetailRow('Тип', _getTypeName(detector.type)),
+              _buildDetailRow('Модель', detector.name),
+              _buildDetailRow(
+                  'Тип байт', '0x${detector.nodeType.toRadixString(16).toUpperCase().padLeft(2, '0')}'),
               _buildDetailRow('Зона', '${detector.zone}'),
               _buildDetailRow('Статус', detector.statusText,
                   color: detector.statusColor),
-              _buildDetailRow('Батарея', '${detector.batteryLevel}%'),
+              _buildDetailRow('Последнее событие', detector.lastEventText),
               _buildDetailRow(
                   'Последняя связь', _formatDateTime(detector.lastSeen)),
               _buildDetailRow('Срабатываний', '${detector.alarmCount}'),
-              if (detector.parameters.isNotEmpty) ...[
-                const Divider(),
-                const Text('Параметры:',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                ...detector.parameters.entries
-                    .map((e) => _buildDetailRow(e.key, e.value.toString())),
-              ],
             ],
           ),
         ),
@@ -333,17 +356,6 @@ class DetectorsScreen extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _getTypeName(DetectorType type) {
-    switch (type) {
-      case DetectorType.vibration:
-        return 'Вибрационный';
-      case DetectorType.infraredLinear:
-        return 'ИК Линейный';
-      case DetectorType.infraredVolumetric:
-        return 'ИК Объемный';
-    }
   }
 
   String _formatDateTime(DateTime dateTime) {

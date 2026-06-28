@@ -20,7 +20,7 @@ class DatabaseService {
     String path = join(await getDatabasesPath(), 'alarm_receiver.db');
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -34,13 +34,13 @@ class DatabaseService {
         name TEXT,
         type INTEGER,
         status INTEGER,
-        batteryLevel INTEGER,
         lastSeen TEXT,
         zone INTEGER,
         isActive INTEGER,
         alarmCount INTEGER,
         isArmed INTEGER,
-        parameters TEXT
+        nodeType INTEGER,
+        lastEventCode INTEGER
       )
     ''');
 
@@ -88,6 +88,11 @@ class DatabaseService {
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE detectors ADD COLUMN isArmed INTEGER DEFAULT 1');
+    }
+    if (oldVersion < 3) {
+      // Добавляем новые поля протокола; старые batteryLevel/parameters остаются, но не используются
+      try { await db.execute('ALTER TABLE detectors ADD COLUMN nodeType INTEGER DEFAULT 0'); } catch (_) {}
+      try { await db.execute('ALTER TABLE detectors ADD COLUMN lastEventCode INTEGER DEFAULT 170'); } catch (_) {}
     }
   }
 
