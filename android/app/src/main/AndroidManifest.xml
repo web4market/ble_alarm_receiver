@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Аудио -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- BLE разрешения -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
