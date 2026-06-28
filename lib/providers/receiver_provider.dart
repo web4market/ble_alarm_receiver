@@ -19,6 +19,11 @@ class ReceiverProvider extends ChangeNotifier {
   StreamSubscription<List<int>>? _notificationSubscription;
   Timer? _connectionMonitorTimer;
 
+  // Alarm tracking
+  final Map<String, DateTime> _alarmStartTimes  = {};
+  final Map<String, bool>     _alarmBorderActive = {};
+  bool _soundEnabled = true;
+
   // UUID для BLE (должны совпадать с концентратором)
   static const String SERVICE_UUID = "e0a1b2c3-d4e5-f6a7-b8c9-d0e1f2a3b4c5";
   static const String DETECTORS_CHAR_UUID =
@@ -45,6 +50,14 @@ class ReceiverProvider extends ChangeNotifier {
   List<BluetoothDevice> get discoveredHubs => _discoveredHubs;
   List<DetectorModel> get detectors => _detectors;
   List<EventModel> get events => _events;
+  Map<String, DateTime> get alarmStartTimes  => Map.unmodifiable(_alarmStartTimes);
+  Map<String, bool>     get alarmBorderActive => Map.unmodifiable(_alarmBorderActive);
+  bool get soundEnabled => _soundEnabled;
+
+  void toggleSound() {
+    _soundEnabled = !_soundEnabled;
+    notifyListeners();
+  }
 
   // Статистика
   int get totalDetectors => _detectors.length;
@@ -429,6 +442,13 @@ class ReceiverProvider extends ChangeNotifier {
     final idx = _detectors.indexWhere((d) => d.id == detId);
     if (idx >= 0) {
       final newStatus = DetectorModel.statusFromEventCode(evtCode);
+
+      // Фиксируем момент начала тревоги и ставим красную рамку
+      if (evtCode == 0x55) {
+        _alarmStartTimes[detId]  = DateTime.now();
+        _alarmBorderActive[detId] = true;
+      }
+
       _detectors[idx] = _detectors[idx].copyWith(
         status:        newStatus,
         lastSeen:      DateTime.now(),
@@ -464,32 +484,37 @@ class ReceiverProvider extends ChangeNotifier {
 
   // Отключить тревогу конкретного извещателя
   Future<void> disarmDetectorAlarm(String detectorId) async {
-    var detector = _detectors.firstWhere((d) => d.id == detectorId);
+    final idx = _detectors.indexWhere((d) => d.id == detectorId);
+    if (idx < 0) return;
 
-    if (detector.status == DetectorStatus.alarm ||
-        detector.status == DetectorStatus.tamper) {
-      detector.status = DetectorStatus.normal;
+    _alarmBorderActive.remove(detectorId);
+    _alarmStartTimes.remove(detectorId);
 
+    if (_detectors[idx].status == DetectorStatus.alarm ||
+        _detectors[idx].status == DetectorStatus.tamper) {
+      _detectors[idx] = _detectors[idx].copyWith(status: DetectorStatus.normal);
       _addEvent(EventModel(
-        timestamp: DateTime.now(),
-        type: EventType.restored,
-        detectorId: detectorId,
-        detectorName: detector.name,
-        description: 'Тревога отключена для ${detector.name}',
+        timestamp:   DateTime.now(),
+        type:        EventType.restored,
+        detectorId:  detectorId,
+        detectorName: _detectors[idx].name,
+        description: 'Тревога сброшена: ${_detectors[idx].name} [$detectorId]',
       ));
-
-      notifyListeners();
     }
+
+    notifyListeners();
   }
 
   // Отключить все тревоги
   Future<void> disarmAllAlarms() async {
     int count = 0;
+    _alarmBorderActive.clear();
+    _alarmStartTimes.clear();
 
-    for (var detector in _detectors) {
-      if (detector.status == DetectorStatus.alarm ||
-          detector.status == DetectorStatus.tamper) {
-        detector.status = DetectorStatus.normal;
+    for (int i = 0; i < _detectors.length; i++) {
+      if (_detectors[i].status == DetectorStatus.alarm ||
+          _detectors[i].status == DetectorStatus.tamper) {
+        _detectors[i] = _detectors[i].copyWith(status: DetectorStatus.normal);
         count++;
       }
     }
@@ -502,7 +527,6 @@ class ReceiverProvider extends ChangeNotifier {
         detectorName: 'Система',
         description: 'Отключены все тревоги ($count)',
       ));
-
       notifyListeners();
     }
   }

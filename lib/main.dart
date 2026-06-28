@@ -15,13 +15,20 @@ class MyApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (context) => ReceiverProvider(),
       child: MaterialApp(
-        title: 'BLE Alarm Receiver',
+        title: 'Zhurin Electronics — Alarm',
         theme: ThemeData(
-          primarySwatch: Colors.deepPurple,
+          brightness: Brightness.dark,
           useMaterial3: true,
-          appBarTheme: const AppBarTheme(
-            backgroundColor: Colors.deepPurple,
-            foregroundColor: Colors.white,
+          scaffoldBackgroundColor: const Color(0xFF0D1117),
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF4FC3F7),
+            brightness: Brightness.dark,
+            surface: const Color(0xFF161B22),
+          ),
+          dividerColor: const Color(0xFF2D3748),
+          dialogBackgroundColor: const Color(0xFF161B22),
+          bottomSheetTheme: const BottomSheetThemeData(
+            backgroundColor: Color(0xFF161B22),
           ),
         ),
         home: const MainScreen(),
