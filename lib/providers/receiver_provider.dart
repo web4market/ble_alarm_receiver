@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../models/detector_model.dart';
 import '../models/event_model.dart';
 import '../services/database_service.dart';
+import '../services/audio_service.dart';
 
 class ReceiverProvider extends ChangeNotifier {
   bool _isScanning = false;
@@ -14,6 +15,7 @@ class ReceiverProvider extends ChangeNotifier {
   List<DetectorModel> _detectors = [];
   List<EventModel> _events = [];
   final DatabaseService _db = DatabaseService();
+  final AudioService _audio = AudioService();
   StreamSubscription? _scanSubscription;
   StreamSubscription? _connectionSubscription;
   StreamSubscription<List<int>>? _notificationSubscription;
@@ -383,6 +385,7 @@ class ReceiverProvider extends ChangeNotifier {
   // Отключение от концентратора
   Future<void> disconnectFromHub() async {
     try {
+      _audio.stop();
       await _connectedHub?.disconnect();
 
       _addEvent(EventModel(
@@ -445,8 +448,11 @@ class ReceiverProvider extends ChangeNotifier {
 
       // Фиксируем момент начала тревоги и ставим красную рамку
       if (evtCode == 0x55) {
-        _alarmStartTimes[detId]  = DateTime.now();
+        _alarmStartTimes[detId]   = DateTime.now();
         _alarmBorderActive[detId] = true;
+        if (_soundEnabled) _audio.playAlarm();
+      } else if (evtCode == 0xA8 || evtCode == 0x58) {
+        if (_soundEnabled) _audio.playWarning();
       }
 
       _detectors[idx] = _detectors[idx].copyWith(
@@ -489,6 +495,8 @@ class ReceiverProvider extends ChangeNotifier {
 
     _alarmBorderActive.remove(detectorId);
     _alarmStartTimes.remove(detectorId);
+    // Останавливаем сирену если больше нет активных тревог
+    if (_alarmBorderActive.isEmpty) _audio.stop();
 
     if (_detectors[idx].status == DetectorStatus.alarm ||
         _detectors[idx].status == DetectorStatus.tamper) {
@@ -510,6 +518,7 @@ class ReceiverProvider extends ChangeNotifier {
     int count = 0;
     _alarmBorderActive.clear();
     _alarmStartTimes.clear();
+    _audio.stop();
 
     for (int i = 0; i < _detectors.length; i++) {
       if (_detectors[i].status == DetectorStatus.alarm ||
@@ -793,6 +802,7 @@ class ReceiverProvider extends ChangeNotifier {
     _notificationSubscription?.cancel();
     _connectionMonitorTimer?.cancel();
     _connectedHub?.disconnect();
+    _audio.dispose();
     super.dispose();
   }
 }
