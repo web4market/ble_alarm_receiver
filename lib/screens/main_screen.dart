@@ -132,8 +132,17 @@ class _MainScreenState extends State<MainScreen> {
               alarmBorderActive: prov.alarmBorderActive[d.id] ?? false,
               alarmStartTime:   prov.alarmStartTimes[d.id],
               isSelected:       _selectedId == d.id,
-              onTap: () => setState(() =>
-                  _selectedId = _selectedId == d.id ? null : d.id),
+              onTap: () {
+                final hasAlarm = (prov.alarmBorderActive[d.id] ?? false) ||
+                    d.status == DetectorStatus.alarm ||
+                    d.status == DetectorStatus.tamper;
+                if (hasAlarm) {
+                  prov.disarmDetectorAlarm(d.id);
+                } else {
+                  setState(() =>
+                      _selectedId = _selectedId == d.id ? null : d.id);
+                }
+              },
               onResetAlarm: () => prov.disarmDetectorAlarm(d.id),
             );
           },
