@@ -7,6 +7,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../models/detector_model.dart';
 import '../models/event_model.dart';
 import '../providers/receiver_provider.dart';
+import '../providers/settings_provider.dart';
+import '../screens/settings_screen.dart';
 import '../widgets/detector_tile.dart';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -50,16 +52,21 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<ReceiverProvider>(
-      builder: (ctx, prov, _) => Scaffold(
-        backgroundColor: _kPage,
-        body: SafeArea(
-          child: Column(
-            children: [
-              _TopBar(
-                provider: prov,
-                onConnect: () => _showConnectionDialog(ctx, prov),
-              ),
+    return Consumer2<ReceiverProvider, SettingsProvider>(
+      builder: (ctx, prov, settings, _) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(
+            textScaler: TextScaler.linear(settings.fontScale)),
+        child: Scaffold(
+          backgroundColor: _kPage,
+          body: SafeArea(
+            child: Column(
+              children: [
+                _TopBar(
+                  provider: prov,
+                  onConnect: () => _showConnectionDialog(ctx, prov),
+                  onSettings: () => Navigator.push(ctx,
+                      MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                ),
               Expanded(
                 child: LayoutBuilder(builder: (_, c) {
                   final wide = c.maxWidth > 560;
@@ -79,6 +86,7 @@ class _MainScreenState extends State<MainScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -283,8 +291,9 @@ class _ClockTextState extends State<_ClockText> {
 class _TopBar extends StatelessWidget {
   final ReceiverProvider provider;
   final VoidCallback onConnect;
+  final VoidCallback onSettings;
 
-  const _TopBar({required this.provider, required this.onConnect});
+  const _TopBar({required this.provider, required this.onConnect, required this.onSettings});
 
   @override
   Widget build(BuildContext context) {
@@ -375,6 +384,9 @@ class _TopBar extends StatelessWidget {
           provider.isConnected ? _kAccBlue : _kText2,
           onConnect,
         ),
+
+        // Settings button
+        _iconBtn(Icons.settings_outlined, _kText2, onSettings),
       ]),
     );
   }
