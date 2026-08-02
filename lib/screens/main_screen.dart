@@ -40,6 +40,20 @@ class _MainScreenState extends State<MainScreen> {
     SystemChrome.setPreferredOrientations(
         [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _autoConnectSavedDevice();
+  }
+
+  // При старте приложения пробуем автоматически подключиться к основному
+  // BLE-устройству, ранее выбранному пользователем на экране настроек
+  // (см. SettingsProvider.primaryDeviceId / ReceiverProvider.autoConnectToSaved).
+  Future<void> _autoConnectSavedDevice() async {
+    final receiver = context.read<ReceiverProvider>();
+    final settings = context.read<SettingsProvider>();
+
+    await receiver.requestPermissions();
+    await settings.load();
+    await receiver.autoConnectToSaved(
+        settings.primaryDeviceId, settings.primaryDeviceName);
   }
 
   @override

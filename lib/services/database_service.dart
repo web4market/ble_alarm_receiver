@@ -310,6 +310,25 @@ class DatabaseService {
     return maps.first['value'];
   }
 
+  // Удалить настройку (используется, например, чтобы "забыть" сохранённое
+  // основное BLE-устройство)
+  Future<void> deleteSetting(String key) async {
+    final db = await database;
+    await db.delete(
+      'settings',
+      where: 'key = ?',
+      whereArgs: [key],
+    );
+  }
+
+  // Очистить только извещатели (например, при каждом новом подключении к
+  // концентратору, пока актуальный список ещё не программируется/не
+  // передаётся заново) — журнал событий при этом не трогаем.
+  Future<void> clearDetectors() async {
+    final db = await database;
+    await db.delete('detectors');
+  }
+
   // Очистить все данные
   Future<void> clearAllData() async {
     final db = await database;

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/receiver_provider.dart';
 
 const _kPage    = Color(0xFF0D1117);
 const _kSurface = Color(0xFF161B22);
@@ -8,6 +10,8 @@ const _kBorder  = Color(0xFF2D3748);
 const _kText1   = Color(0xFFD0DDD8);
 const _kText2   = Color(0xFF6A8090);
 const _kAccBlue = Color(0xFF4FC3F7);
+const _kAccGreen = Color(0xFF34A853);
+const _kAccRed = Color(0xFFEA4335);
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -30,14 +34,18 @@ class SettingsScreen extends StatelessWidget {
           child: Divider(height: 1, color: _kBorder),
         ),
       ),
-      body: Consumer<SettingsProvider>(
-        builder: (context, settings, _) {
+      body: Consumer2<SettingsProvider, ReceiverProvider>(
+        builder: (context, settings, receiver, _) {
           return ListView(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
             children: [
               _SectionHeader('ОТОБРАЖЕНИЕ'),
               const SizedBox(height: 12),
               _FontScaleTile(settings: settings),
+              const SizedBox(height: 24),
+              _SectionHeader('ОСНОВНОЕ BLE-УСТРОЙСТВО'),
+              const SizedBox(height: 12),
+              _PrimaryDeviceSection(settings: settings, receiver: receiver),
             ],
           );
         },
@@ -227,6 +235,195 @@ class _FontScaleTile extends StatelessWidget {
                 color: active ? _kAccBlue : _kText2,
                 fontWeight:
                     active ? FontWeight.w700 : FontWeight.normal)),
+      ),
+    );
+  }
+}
+
+// ── Основное BLE-устройство ────────────────────────────────────────────────
+//
+// Вместо заранее прошитых в приложении UUID сервиса/характеристик, поиск
+// концентратора теперь идёт по списку известных имён
+// (ReceiverProvider.TARGET_DEVICE_NAMES). Пользователь ищет устройство здесь,
+// выбирает нужное — оно запоминается как основное и постоянное, и при
+// следующих запусках приложение подключается к нему автоматически.
+class _PrimaryDeviceSection extends StatelessWidget {
+  final SettingsProvider settings;
+  final ReceiverProvider receiver;
+
+  const _PrimaryDeviceSection({required this.settings, required this.receiver});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _kSurface,
+        border: Border.all(color: _kBorder),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _currentDeviceRow(context),
+          const SizedBox(height: 12),
+          if (receiver.isPairingScan) ...[
+            _scanningRow(),
+            const SizedBox(height: 12),
+          ],
+          if (receiver.pairingResults.isNotEmpty) ...[
+            ...receiver.pairingResults.map((r) => _foundDeviceTile(context, r)),
+            const SizedBox(height: 8),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: _actionBtn(
+                  label: receiver.isPairingScan ? 'Остановить поиск' : 'Найти устройство',
+                  icon: receiver.isPairingScan
+                      ? Icons.stop_circle_outlined
+                      : Icons.bluetooth_searching,
+                  color: receiver.isPairingScan ? _kAccRed : _kAccBlue,
+                  onTap: () => receiver.isPairingScan
+                      ? receiver.stopPairingScan()
+                      : receiver.startPairingScan(),
+                ),
+              ),
+              if (settings.hasPrimaryDevice) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _actionBtn(
+                    label: 'Забыть',
+                    icon: Icons.delete_outline,
+                    color: _kText2,
+                    onTap: settings.clearPrimaryDevice,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _currentDeviceRow(BuildContext context) {
+    final has = settings.hasPrimaryDevice;
+    return Row(
+      children: [
+        Icon(
+          has ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
+          color: has ? _kAccGreen : _kText2,
+          size: 20,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                has ? (settings.primaryDeviceName ?? '') : 'Устройство не выбрано',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: has ? _kText1 : _kText2),
+              ),
+              if (has)
+                Text(settings.primaryDeviceId ?? '',
+                    style: const TextStyle(
+                        fontSize: 10, color: _kText2, fontFamily: 'monospace')),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _scanningRow() {
+    return Row(children: [
+      const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2, color: _kAccBlue)),
+      const SizedBox(width: 10),
+      const Text('Поиск устройств из списка известных имён...',
+          style: TextStyle(fontSize: 12, color: _kText2)),
+    ]);
+  }
+
+  Widget _foundDeviceTile(BuildContext context, ScanResult result) {
+    final name = receiver.scanResultName(result);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: _kPage,
+        border: Border.all(color: _kBorder),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.hub, color: _kAccBlue, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name.isNotEmpty ? name : 'BLE Hub',
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w600, color: _kText1)),
+                Text(result.device.remoteId.toString(),
+                    style: const TextStyle(
+                        fontSize: 9, color: _kText2, fontFamily: 'monospace')),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () => receiver.connectAsPrimaryDevice(
+              result,
+              settings.setPrimaryDevice,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _kAccGreen.withOpacity(0.15),
+                border: Border.all(color: _kAccGreen.withOpacity(0.5)),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text('Выбрать',
+                  style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w700, color: _kAccGreen)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _actionBtn({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          border: Border.all(color: color.withOpacity(0.5)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 15, color: color),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+          ],
+        ),
       ),
     );
   }
