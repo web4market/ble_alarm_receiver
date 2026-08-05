@@ -47,9 +47,20 @@ class ReceiverProvider extends ChangeNotifier {
     "BT485_EE2D"
   ];
 
-  BluetoothCharacteristic? _detectorsChar;
+  // Характеристика, с которой реально пришёл первый валидный пакет
+  // протокола извещателей/событий (см. connectToHub) — заполняется по
+  // содержимому пакета, а не по заранее известному UUID.
   BluetoothCharacteristic? _eventsChar;
   BluetoothCharacteristic? _commandChar;
+
+  // Диагностика RAW-пакетов (см. _logRawPacket): для каждой характеристики
+  // (ключ "serviceUuid/charUuid") храним последний полученный пакет и
+  // порядковый номер, чтобы в лог выводить не только сами байты, но и то,
+  // что именно изменилось по сравнению с предыдущим пакетом с этой же
+  // характеристики. Это должно помочь понять формат протокола BT485_EE2D
+  // (например, отличить heartbeat в покое от пакета реального события).
+  final Map<String, List<int>> _lastRawPacket = {};
+  final Map<String, int> _rawPacketSeq = {};
 
   // Геттеры
   bool get isScanning => _isScanning;
@@ -167,6 +178,51 @@ class ReceiverProvider extends ChangeNotifier {
     return TARGET_DEVICE_NAMES.any((t) => t.trim().toLowerCase() == n);
   }
 
+  // Диагностический лог RAW-пакетов с любой notify/indicate-характеристики.
+  // Печатает: порядковый номер пакета с этой характеристики, время с
+  // миллисекундами (чтобы сопоставлять с реальными действиями — тревога,
+  // вскрытие и т.п.), сами байты в hex и — самое важное — то, что именно
+  // изменилось по сравнению с ПРЕДЫДУЩИМ пакетом с этой же характеристики.
+  // Это позволяет отличить "пакет одинаков всегда" (скорее всего heartbeat,
+  // не связанный с событием) от "поменялись байты N и M" (в них, скорее
+  // всего, и зашит код события/ID извещателя).
+  void _logRawPacket(String key, List<int> data) {
+    final seq = (_rawPacketSeq[key] ?? 0) + 1;
+    _rawPacketSeq[key] = seq;
+
+    final now = DateTime.now();
+    final ts = '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}:'
+        '${now.second.toString().padLeft(2, '0')}.'
+        '${now.millisecond.toString().padLeft(3, '0')}';
+
+    final hex = data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+
+    final prev = _lastRawPacket[key];
+    String diff;
+    if (prev == null) {
+      diff = 'первый пакет с этой характеристики';
+    } else if (prev.length != data.length) {
+      diff = 'длина изменилась: ${prev.length} → ${data.length} байт';
+    } else {
+      final changes = <String>[];
+      for (int i = 0; i < data.length; i++) {
+        if (data[i] != prev[i]) {
+          changes.add('[$i] '
+              '0x${prev[i].toRadixString(16).padLeft(2, '0')} → '
+              '0x${data[i].toRadixString(16).padLeft(2, '0')}');
+        }
+      }
+      diff = changes.isEmpty
+          ? 'без изменений относительно предыдущего пакета'
+          : 'изменились байты: ${changes.join(', ')}';
+    }
+    _lastRawPacket[key] = List<int>.from(data);
+
+    debugPrint('📦 RAW [$key] #$seq @ $ts (${data.length} байт): $hex');
+    debugPrint('    Δ $diff');
+  }
+
   // Сканирование концентраторов
   Future<void> startScanning() async {
     try {
@@ -260,54 +316,82 @@ class ReceiverProvider extends ChangeNotifier {
       debugPrint('📋 Найдено сервисов: ${services.length}');
 
       // Сбрасываем характеристики
-      _detectorsChar = null;
       _eventsChar = null;
       _commandChar = null;
 
-// Ищем нужные сервисы и характеристики
+// Ищем нужные характеристики во всех сервисах подряд.
+      // UUID самого сервиса и характеристик у BT485_EE2D (и вообще у любого
+      // концентратора из TARGET_DEVICE_NAMES) не документирован и может
+      // отличаться от прошивки к прошивке, поэтому НЕ сравниваем
+      // serviceUuid/charUuid извещателей и событий с жёстко заданными
+      // значениями — просто просматриваем характеристики каждого найденного
+      // сервиса, независимо от его UUID, и определяем, наш ли это протокол,
+      // по содержимому самого пакета (см. ниже).
       for (var service in services) {
         String serviceUuid = service.uuid.toString().toUpperCase();
         debugPrint('Сервис: $serviceUuid');
 
-        // ПРОСТОЕ СРАВНЕНИЕ - ищем вхождение ключевой части UUID
-        if (serviceUuid.contains("E0A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C5")) {
-          debugPrint('✅ Найден нужный сервис!');
+        for (var characteristic in service.characteristics) {
+          String charUuid = characteristic.uuid.toString().toUpperCase();
+          debugPrint('  Характеристика: $charUuid'
+              ' (notify=${characteristic.properties.notify},'
+              ' indicate=${characteristic.properties.indicate})');
 
-          for (var characteristic in service.characteristics) {
-            String charUuid = characteristic.uuid.toString().toUpperCase();
-            debugPrint('  Характеристика: $charUuid');
-
-            // Простое сравнение по ключевой части
-            if (charUuid.contains("E1A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C6")) {
-              _detectorsChar = characteristic;
-              await _detectorsChar!.setNotifyValue(true);
-              _detectorsChar!.lastValueStream.listen(_handleDetectorsData);
-              debugPrint('    ✅ ХАРАКТЕРИСТИКА ИЗВЕЩАТЕЛЕЙ НАЙДЕНА');
-            } else if (charUuid
-                .contains("E2A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C7")) {
-              _eventsChar = characteristic;
-              await _eventsChar!.setNotifyValue(true);
-              _eventsChar!.lastValueStream.listen(_handleEventData);
-              debugPrint('    ✅ ХАРАКТЕРИСТИКА СОБЫТИЙ НАЙДЕНА');
-            } else if (charUuid
-                .contains("E3A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C8")) {
-              _commandChar = characteristic;
-              debugPrint('    ✅ ХАРАКТЕРИСТИКА КОМАНД НАЙДЕНА');
+          // Подписываемся на КАЖДУЮ характеристику, поддерживающую
+          // notify/indicate, независимо от её UUID — заранее известного
+          // "правильного" UUID для извещателей/событий нет (он отличается
+          // от устройства к устройству), поэтому единственный надёжный
+          // способ понять, что перед нами наш протокол, — проверить сам
+          // пакет: 6 байт, канал 0x22, резервный байт 0x33 (см.
+          // _validatePacket). Если пакет валиден — обрабатываем его как
+          // событие/инициализацию извещателя, независимо от того, на какой
+          // именно характеристике он пришёл. Заодно продолжаем печатать
+          // необработанные байты в терминал — это помогает разобрать
+          // протокол устройств, для которых формат ещё не подтверждён.
+          if (characteristic.properties.notify ||
+              characteristic.properties.indicate) {
+            try {
+              await characteristic.setNotifyValue(true);
+              final rawKey = '$serviceUuid/$charUuid';
+              characteristic.lastValueStream.listen((data) {
+                _logRawPacket(rawKey, data);
+                if (_validatePacket(data)) {
+                  // HUB может прислать пакет длиннее 6 байт — по протоколу
+                  // разбираются только первые 6, остальное отбрасывается.
+                  final pkt = data.length > 6 ? data.sublist(0, 6) : data;
+                  _eventsChar ??= characteristic;
+                  _handleEventData(pkt);
+                }
+              });
+            } catch (e) {
+              debugPrint('    ⚠️ Не удалось включить notify для $charUuid: $e');
             }
+          }
+
+          // Характеристику команд (запись "GET_DETECTORS" и т.п.) по
+          // содержимому не определить — она write-only и сама ничего не
+          // присылает, поэтому для неё сравнение по UUID пока оставляем.
+          // Если он не совпадёт (как сейчас на BT485_EE2D), команда на
+          // устройство просто не отправляется — на приём и разбор пакетов
+          // извещателей/событий выше это не влияет.
+          if (charUuid.contains("E3A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C8")) {
+            _commandChar = characteristic;
+            debugPrint('    ✅ ХАРАКТЕРИСТИКА КОМАНД НАЙДЕНА');
           }
         }
       }
 
-      // Протокол извещателей/событий/команд пока не реализован на стороне
-      // самого устройства (BT485_EE2D отдаёт только стандартные
-      // 1800/1801/FFF0/кастомный сервис) — отсутствие этих характеристик
-      // сейчас норма, а не ошибка подключения. Сообщаем информационно.
-      if (_detectorsChar == null)
-        debugPrint('ℹ️ Характеристика извещателей не найдена (протокол ещё не подключён)');
+      // Характеристика команд определяется по UUID сразу; характеристика
+      // извещателей/событий подтверждается только когда придёт первый
+      // валидный пакет (см. цикл выше) — сразу после discoverServices() он
+      // обычно ещё не получен, поэтому это нормальная промежуточная
+      // ситуация, а не ошибка подключения.
       if (_eventsChar == null)
-        debugPrint('ℹ️ Характеристика событий не найдена (протокол ещё не подключён)');
+        debugPrint(
+            'ℹ️ Пока не получено ни одного валидного пакета извещателей/событий');
       if (_commandChar == null)
-        debugPrint('ℹ️ Характеристика команд не найдена (протокол ещё не подключён)');
+        debugPrint(
+            'ℹ️ Характеристика команд не найдена (протокол ещё не подключён)');
 
       _isConnected = true;
 
@@ -360,16 +444,19 @@ class ReceiverProvider extends ChangeNotifier {
       if (_isPairingScan) return;
 
       final granted = await requestPermissions();
-      debugPrint('Разрешения на Bluetooth/геолокацию: ${granted ? "выданы" : "НЕ выданы"}');
+      debugPrint(
+          'Разрешения на Bluetooth/геолокацию: ${granted ? "выданы" : "НЕ выданы"}');
       if (!granted) {
-        debugPrint('❌ Без разрешений сканирование не найдёт ни одного устройства');
+        debugPrint(
+            '❌ Без разрешений сканирование не найдёт ни одного устройства');
       }
 
       _pairingResults.clear();
       _isPairingScan = true;
       notifyListeners();
 
-      debugPrint('▶️ Поиск устройств для выбора основного (${timeout.inSeconds} сек)...');
+      debugPrint(
+          '▶️ Поиск устройств для выбора основного (${timeout.inSeconds} сек)...');
 
       await FlutterBluePlus.startScan(
         timeout: timeout,
@@ -390,7 +477,8 @@ class ReceiverProvider extends ChangeNotifier {
               !_pairingResults
                   .any((r) => r.device.remoteId == result.device.remoteId)) {
             _pairingResults.add(result);
-            debugPrint('🔎 Найдено для выбора: "$name" (${result.device.remoteId})');
+            debugPrint(
+                '🔎 Найдено для выбора: "$name" (${result.device.remoteId})');
             notifyListeners();
           }
         }
@@ -449,12 +537,14 @@ class ReceiverProvider extends ChangeNotifier {
   // идентификатору/имени и подключаемся, как только оно появится.
   Future<void> autoConnectToSaved(String? remoteId, String? name) async {
     if (remoteId == null || remoteId.isEmpty) {
-      debugPrint('ℹ️ Основное устройство не выбрано — авто-подключение пропущено');
+      debugPrint(
+          'ℹ️ Основное устройство не выбрано — авто-подключение пропущено');
       return;
     }
     if (_isConnected) return;
 
-    debugPrint('🔁 Пробуем подключиться к сохранённому устройству "$name" ($remoteId)...');
+    debugPrint(
+        '🔁 Пробуем подключиться к сохранённому устройству "$name" ($remoteId)...');
 
     try {
       final device = BluetoothDevice.fromId(remoteId);
@@ -492,7 +582,8 @@ class ReceiverProvider extends ChangeNotifier {
       _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
         for (final result in results) {
           final deviceName = scanResultName(result);
-          debugPrint('BLE (поиск сохранённого): "$deviceName" rssi=${result.rssi} '
+          debugPrint(
+              'BLE (поиск сохранённого): "$deviceName" rssi=${result.rssi} '
               'id=${result.device.remoteId}');
 
           final matches = result.device.remoteId.toString() == remoteId ||
@@ -520,16 +611,18 @@ class ReceiverProvider extends ChangeNotifier {
     }
   }
 
-  // ========== ПАРСИНГ 6-БАЙТНОГО ПАКЕТА ==========
+  // ========== ПАРСИНГ ПАКЕТА ПО ПЕРВЫМ 6 БАЙТАМ ==========
+  // HUB может передать пакет любой длины — анализируются только первые
+  // 6 байт по уже известному протоколу, остальное (если есть) игнорируется:
   // [0] ID_HI  [1] ID_LO  [2] CHANNEL(0x22)
   // [3] eventCode  [4] RESERVED(0x33)  [5] nodeType
 
-  static const int _channel = 0x22;
+  static const int _channel = 0xaa;
   static const int _reserved = 0x33;
 
   bool _validatePacket(List<int> pkt) {
-    if (pkt.length != 6) {
-      debugPrint('Неверная длина пакета: ${pkt.length}');
+    if (pkt.length < 6) {
+      debugPrint('Неверная длина пакета: ${pkt.length} (нужно минимум 6 байт)');
       return false;
     }
     if (pkt[2] != _channel) {
@@ -589,30 +682,6 @@ class ReceiverProvider extends ChangeNotifier {
     }
   }
 
-  void _handleDetectorsData(List<int> data) {
-    if (!_validatePacket(data)) return;
-
-    final detector = DetectorModel.fromPacket(data);
-    final detId = DetectorModel.idFromPacket(data);
-    debugPrint(
-        'Пакет датчика $detId (${detector.name}) статус ${detector.status}');
-
-    final idx = _detectors.indexWhere((d) => d.id == detId);
-    if (idx >= 0) {
-      _detectors[idx] = _detectors[idx].copyWith(
-        status: detector.status,
-        lastSeen: DateTime.now(),
-        isActive: true,
-        lastEventCode: data[3],
-      );
-    } else {
-      _detectors.add(detector);
-    }
-
-    _db.saveDetectors(_detectors);
-    notifyListeners();
-  }
-
   // Отключение от концентратора
   Future<void> disconnectFromHub() async {
     try {
@@ -629,7 +698,6 @@ class ReceiverProvider extends ChangeNotifier {
 
       _isConnected = false;
       _connectedHub = null;
-      _detectorsChar = null;
       _eventsChar = null;
       _commandChar = null;
 
@@ -673,19 +741,25 @@ class ReceiverProvider extends ChangeNotifier {
       description: _eventDescription(evtCode, '$detName [$detId]'),
     ));
 
-    // Обновляем статус датчика в списке
+    // Обновляем статус датчика в списке (или инициализируем новый, если
+    // пакет события — первый когда-либо полученный от этого извещателя:
+    // характеристика извещателей на устройстве может не использоваться, и
+    // тогда единственный способ узнать о новом извещателе — это пакет
+    // события, включая самый первый пришедший как тревога).
     final idx = _detectors.indexWhere((d) => d.id == detId);
+
+    // Фиксируем момент начала тревоги и ставим красную рамку —
+    // одинаково и для уже известных, и для новых извещателей.
+    if (evtCode == 0x55) {
+      _alarmStartTimes[detId] = DateTime.now();
+      _alarmBorderActive[detId] = true;
+      if (_soundEnabled) _audio.playAlarm();
+    } else if (evtCode == 0xA8 || evtCode == 0x58) {
+      if (_soundEnabled) _audio.playWarning();
+    }
+
     if (idx >= 0) {
       final newStatus = DetectorModel.statusFromEventCode(evtCode);
-
-      // Фиксируем момент начала тревоги и ставим красную рамку
-      if (evtCode == 0x55) {
-        _alarmStartTimes[detId] = DateTime.now();
-        _alarmBorderActive[detId] = true;
-        if (_soundEnabled) _audio.playAlarm();
-      } else if (evtCode == 0xA8 || evtCode == 0x58) {
-        if (_soundEnabled) _audio.playWarning();
-      }
 
       _detectors[idx] = _detectors[idx].copyWith(
         status: newStatus,
@@ -695,8 +769,20 @@ class ReceiverProvider extends ChangeNotifier {
             ? _detectors[idx].alarmCount + 1
             : _detectors[idx].alarmCount,
       );
-      notifyListeners();
+      _db.saveDetector(_detectors[idx]);
+    } else {
+      // Новый извещатель: инициализируем его прямо по пакету события и
+      // сразу добавляем в список (главный экран) и в базу данных.
+      final newDetector = DetectorModel.fromPacket(data)
+        ..alarmCount = evtCode == 0x55 ? 1 : 0;
+
+      _detectors.add(newDetector);
+      _db.saveDetector(newDetector);
+
+      debugPrint('🆕 Новый извещатель инициализирован: $detId ($detName)');
     }
+
+    notifyListeners();
   }
 
   // Добавить событие
