@@ -3,49 +3,555 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/receiver_provider.dart';
+import '../theme/app_theme.dart';
 
-const _kPage    = Color(0xFF0D1117);
-const _kSurface = Color(0xFF161B22);
-const _kBorder  = Color(0xFF2D3748);
-const _kText1   = Color(0xFFD0DDD8);
-const _kText2   = Color(0xFF6A8090);
-const _kAccBlue = Color(0xFF4FC3F7);
-const _kAccGreen = Color(0xFF34A853);
-const _kAccRed = Color(0xFFEA4335);
+// Accent colours are stable across themes.
+const _kAccBlue  = kAccBlue;
+const _kAccGreen = kAccGreen;
+const _kAccRed   = kAccRed;
+
+// ── Общие компоненты ──────────────────────────────────────────────────────────
+
+AppBar _settingsAppBar(BuildContext context, String title, {List<Widget>? actions}) {
+  final c = appColors(context);
+  return AppBar(
+    backgroundColor: c.surface,
+    foregroundColor: c.text1,
+    titleSpacing: 0,
+    title: Text(title,
+        style: const TextStyle(
+            fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 2)),
+    centerTitle: false,
+    actions: actions,
+    bottom: PreferredSize(
+      preferredSize: const Size.fromHeight(1),
+      child: Divider(height: 1, color: c.border),
+    ),
+  );
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader(this.title);
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
+        child: Text(title,
+            style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 2,
+                color: _kAccBlue)),
+      );
+}
+
+class _SettingsRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _SettingsRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: c.border, width: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: _kAccBlue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, size: 18, color: _kAccBlue),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: c.text1)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: TextStyle(fontSize: 11, color: c.text2)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, size: 18, color: c.text2),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Главный экран настроек
+// ════════════════════════════════════════════════════════════════════════════
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final c = appColors(context);
     return Scaffold(
-      backgroundColor: _kPage,
-      appBar: AppBar(
-        backgroundColor: _kSurface,
-        foregroundColor: _kText1,
-        title: const Text(
-          'НАСТРОЙКИ',
-          style: TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 2),
-        ),
-        centerTitle: false,
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: _kBorder),
-        ),
-      ),
+      backgroundColor: c.page,
+      appBar: _settingsAppBar(context, 'НАСТРОЙКИ'),
       body: Consumer2<SettingsProvider, ReceiverProvider>(
-        builder: (context, settings, receiver, _) {
+        builder: (ctx, settings, receiver, _) {
+          final pct = (settings.fontScale * 100).round();
+          final themeName = _themeLabel(settings.themeMode);
+          final bleSubtitle = settings.hasPrimaryDevice
+              ? settings.primaryDeviceName ?? 'Устройство выбрано'
+              : 'Устройство не выбрано';
+
           return ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
             children: [
-              _SectionHeader('ОТОБРАЖЕНИЕ'),
-              const SizedBox(height: 12),
-              _FontScaleTile(settings: settings),
-              const SizedBox(height: 24),
-              _SectionHeader('ОСНОВНОЕ BLE-УСТРОЙСТВО'),
-              const SizedBox(height: 12),
-              _PrimaryDeviceSection(settings: settings, receiver: receiver),
+              _SectionHeader('ИНТЕРФЕЙС'),
+              _SettingsRow(
+                icon: Icons.text_fields,
+                title: 'Экран',
+                subtitle: 'Шрифт: $pct%  •  Тема: $themeName',
+                onTap: () => Navigator.push(ctx,
+                    MaterialPageRoute(builder: (_) => const ScreenSettingsPage())),
+              ),
+              _SectionHeader('ПОДКЛЮЧЕНИЕ'),
+              _SettingsRow(
+                icon: Icons.bluetooth,
+                title: 'Bluetooth',
+                subtitle: bleSubtitle,
+                onTap: () => Navigator.push(ctx,
+                    MaterialPageRoute(builder: (_) => const BluetoothSettingsPage())),
+              ),
+              _SectionHeader('УВЕДОМЛЕНИЯ'),
+              _SettingsRow(
+                icon: Icons.volume_up_outlined,
+                title: 'Звук',
+                subtitle: receiver.soundEnabled ? 'Включён' : 'Выключен',
+                onTap: () => Navigator.push(ctx,
+                    MaterialPageRoute(builder: (_) => const SoundSettingsPage())),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  static String _themeLabel(ThemeMode m) => switch (m) {
+        ThemeMode.dark   => 'Тёмная',
+        ThemeMode.light  => 'Светлая',
+        ThemeMode.system => 'Системная',
+      };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Экран → Настройки экрана (шрифт)
+// ════════════════════════════════════════════════════════════════════════════
+
+class ScreenSettingsPage extends StatelessWidget {
+  const ScreenSettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    return Scaffold(
+      backgroundColor: c.page,
+      appBar: _settingsAppBar(context, 'ЭКРАН'),
+      body: Consumer<SettingsProvider>(
+        builder: (ctx, settings, _) {
+          final scale = settings.fontScale;
+          final pct   = (scale * 100).round();
+
+          return ListView(
+            children: [
+              // ── Тема ──────────────────────────────────────────────────────
+              _SectionHeader('ТЕМА ОФОРМЛЕНИЯ'),
+              Container(
+                color: c.surface,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+                child: _ThemePicker(settings: settings),
+              ),
+              Divider(height: 1, color: c.border),
+
+              // ── Шрифт ─────────────────────────────────────────────────────
+              _SectionHeader('РАЗМЕР ШРИФТА'),
+              Container(
+                color: c.surface,
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Заголовок со значением
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Масштаб текста',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: c.text1)),
+                        _pctBadge(pct),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Масштабирует весь текст на главном экране',
+                      style: TextStyle(fontSize: 11, color: c.text2),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Слайдер
+                    SliderTheme(
+                      data: SliderTheme.of(ctx).copyWith(
+                        activeTrackColor: _kAccBlue,
+                        inactiveTrackColor: c.border,
+                        thumbColor: _kAccBlue,
+                        overlayColor: _kAccBlue.withOpacity(0.15),
+                        trackHeight: 3,
+                        thumbShape:
+                            const RoundSliderThumbShape(enabledThumbRadius: 8),
+                      ),
+                      child: Slider(
+                        value: scale,
+                        min: 0.6,
+                        max: 2.0,
+                        divisions: 14,
+                        onChanged: settings.setFontScale,
+                      ),
+                    ),
+
+                    // Кнопки − / пресеты / +
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _stepBtn(ctx, '−', () => settings.setFontScale(scale - 0.1)),
+                        Row(children: [
+                          _presetBtn(ctx, '60%',  0.6, scale, settings),
+                          const SizedBox(width: 6),
+                          _presetBtn(ctx, '100%', 1.0, scale, settings),
+                          const SizedBox(width: 6),
+                          _presetBtn(ctx, '150%', 1.5, scale, settings),
+                          const SizedBox(width: 6),
+                          _presetBtn(ctx, '200%', 2.0, scale, settings),
+                        ]),
+                        _stepBtn(ctx, '+', () => settings.setFontScale(scale + 0.1)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: c.border),
+
+              // Превью
+              _SectionHeader('ПРЕДПРОСМОТР'),
+              Container(
+                color: c.surface,
+                padding: const EdgeInsets.all(16),
+                child: MediaQuery(
+                  data: MediaQuery.of(ctx)
+                      .copyWith(textScaler: TextScaler.linear(scale)),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: c.page,
+                      border: Border.all(color: c.border),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Зона 1  •  L50RA LoRa',
+                            style: TextStyle(
+                                fontSize: 9, color: c.text2, letterSpacing: 0.4)),
+                        const SizedBox(height: 4),
+                        Text('ТРЕВОГА',
+                            style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: _kAccRed)),
+                        Text('ID: 0001  •  Контроль',
+                            style: TextStyle(
+                                fontSize: 9, color: c.text2)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _pctBadge(int pct) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: _kAccBlue.withOpacity(0.15),
+          border: Border.all(color: _kAccBlue.withOpacity(0.4)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text('$pct%',
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: _kAccBlue,
+                fontFamily: 'monospace')),
+      );
+
+  Widget _stepBtn(BuildContext ctx, String label, VoidCallback onTap) {
+    final c = appColors(ctx);
+    return GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: c.border.withOpacity(0.4),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Center(
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 18,
+                    color: c.text1,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ),
+      );
+  }
+
+  Widget _presetBtn(
+      BuildContext ctx, String label, double value, double current, SettingsProvider s) {
+    final c      = appColors(ctx);
+    final active = (current - value).abs() < 0.05;
+    return GestureDetector(
+      onTap: () => s.setFontScale(value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: active ? _kAccBlue.withOpacity(0.2) : Colors.transparent,
+          border: Border.all(color: active ? _kAccBlue : c.border),
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 10,
+                color: active ? _kAccBlue : c.text2,
+                fontWeight:
+                    active ? FontWeight.w700 : FontWeight.normal)),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Bluetooth → Настройки BLE-устройства
+// ════════════════════════════════════════════════════════════════════════════
+
+class BluetoothSettingsPage extends StatelessWidget {
+  const BluetoothSettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    return Scaffold(
+      backgroundColor: c.page,
+      appBar: _settingsAppBar(context, 'BLUETOOTH'),
+      body: Consumer2<SettingsProvider, ReceiverProvider>(
+        builder: (ctx, settings, receiver, _) {
+          return ListView(
+            children: [
+              _SectionHeader('ОСНОВНОЕ УСТРОЙСТВО'),
+
+              // Текущее устройство
+              Container(
+                color: c.surface,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: settings.hasPrimaryDevice
+                                ? _kAccGreen.withOpacity(0.12)
+                                : c.border.withOpacity(0.3),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            settings.hasPrimaryDevice
+                                ? Icons.bluetooth_connected
+                                : Icons.bluetooth_disabled,
+                            size: 20,
+                            color: settings.hasPrimaryDevice
+                                ? _kAccGreen
+                                : c.text2,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                settings.hasPrimaryDevice
+                                    ? (settings.primaryDeviceName ?? '—')
+                                    : 'Устройство не выбрано',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: settings.hasPrimaryDevice
+                                        ? c.text1
+                                        : c.text2),
+                              ),
+                              if (settings.hasPrimaryDevice)
+                                Text(settings.primaryDeviceId ?? '',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: c.text2,
+                                        fontFamily: 'monospace')),
+                              if (!settings.hasPrimaryDevice)
+                                Text(
+                                    'Нажмите «Найти устройство» для поиска',
+                                    style: TextStyle(
+                                        fontSize: 11, color: c.text2)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Индикатор сканирования
+                    if (receiver.isPairingScan) ...[
+                      const SizedBox(height: 16),
+                      Divider(height: 1, color: c.border),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: _kAccBlue),
+                          ),
+                          const SizedBox(width: 10),
+                          Text('Поиск концентраторов...',
+                              style: TextStyle(fontSize: 12, color: c.text2)),
+                        ],
+                      ),
+                    ],
+
+                    // Найденные устройства
+                    if (receiver.pairingResults.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Divider(height: 1, color: c.border),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Найдено:',
+                            style: TextStyle(fontSize: 10, color: c.text2)),
+                      ),
+                      const SizedBox(height: 8),
+                      ...receiver.pairingResults
+                          .map((r) => _FoundDeviceTile(
+                                result: r,
+                                receiver: receiver,
+                                settings: settings,
+                              )),
+                    ],
+
+                    const SizedBox(height: 16),
+                    Divider(height: 1, color: c.border),
+                    const SizedBox(height: 16),
+
+                    // Кнопки
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _BleActionBtn(
+                            label: receiver.isPairingScan
+                                ? 'Остановить'
+                                : 'Найти устройство',
+                            icon: receiver.isPairingScan
+                                ? Icons.stop_circle_outlined
+                                : Icons.bluetooth_searching,
+                            color: receiver.isPairingScan
+                                ? _kAccRed
+                                : _kAccBlue,
+                            onTap: receiver.isPairingScan
+                                ? receiver.stopPairingScan
+                                : receiver.startPairingScan,
+                          ),
+                        ),
+                        if (settings.hasPrimaryDevice) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _BleActionBtn(
+                              label: 'Забыть устройство',
+                              icon: Icons.delete_outline,
+                              color: c.text2,
+                              onTap: settings.clearPrimaryDevice,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              _SectionHeader('ИНФОРМАЦИЯ'),
+              Container(
+                color: c.surface,
+                child: Column(
+                  children: [
+                    _InfoRow(
+                      label: 'Статус соединения',
+                      value: receiver.isConnected ? 'Подключено' : 'Отключено',
+                      valueColor: receiver.isConnected ? _kAccGreen : c.text2,
+                    ),
+                    Divider(height: 1, color: c.border),
+                    _InfoRow(
+                      label: 'Активный концентратор',
+                      value: receiver.isConnected
+                          ? (receiver.connectedHub?.platformName ??
+                              'BLE Alarm Hub')
+                          : '—',
+                    ),
+                    Divider(height: 1, color: c.border),
+                    _InfoRow(
+                      label: 'MAC-адрес',
+                      value: receiver.isConnected
+                          ? (receiver.connectedHub?.remoteId.toString() ?? '—')
+                          : '—',
+                      mono: true,
+                    ),
+                  ],
+                ),
+              ),
             ],
           );
         },
@@ -54,337 +560,55 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  const _SectionHeader(this.title);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: const TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 2,
-          color: _kText2),
-    );
-  }
-}
-
-class _FontScaleTile extends StatelessWidget {
-  final SettingsProvider settings;
-  const _FontScaleTile({required this.settings});
-
-  @override
-  Widget build(BuildContext context) {
-    final scale = settings.fontScale;
-    final pct   = (scale * 100).round();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: _kSurface,
-        border: Border.all(color: _kBorder),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Размер шрифта',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: _kText1)),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _kAccBlue.withOpacity(0.15),
-                  border: Border.all(color: _kAccBlue.withOpacity(0.4)),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  '$pct%',
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: _kAccBlue,
-                      fontFamily: 'monospace'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Масштаб текста на основном экране',
-            style: const TextStyle(fontSize: 11, color: _kText2),
-          ),
-          const SizedBox(height: 12),
-
-          // Slider
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: _kAccBlue,
-              inactiveTrackColor: _kBorder,
-              thumbColor: _kAccBlue,
-              overlayColor: _kAccBlue.withOpacity(0.15),
-              trackHeight: 3,
-              thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 8),
-            ),
-            child: Slider(
-              value: scale,
-              min: 0.6,
-              max: 2.0,
-              divisions: 14,
-              onChanged: settings.setFontScale,
-            ),
-          ),
-
-          // Scale labels
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _scaleBtn('−', () => settings.setFontScale(scale - 0.1)),
-              Row(children: [
-                _presetBtn('60%',  0.6,  scale, settings),
-                const SizedBox(width: 6),
-                _presetBtn('100%', 1.0,  scale, settings),
-                const SizedBox(width: 6),
-                _presetBtn('150%', 1.5,  scale, settings),
-                const SizedBox(width: 6),
-                _presetBtn('200%', 2.0,  scale, settings),
-              ]),
-              _scaleBtn('+', () => settings.setFontScale(scale + 0.1)),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // Preview
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _kPage,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: _kBorder),
-            ),
-            child: MediaQuery(
-              data: MediaQuery.of(context)
-                  .copyWith(textScaler: TextScaler.linear(scale)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Зона 1  •  L50RA LoRa',
-                      style: const TextStyle(
-                          fontSize: 9, color: _kText2, letterSpacing: 0.4)),
-                  const SizedBox(height: 4),
-                  Text('ТРЕВОГА',
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFFEA4335))),
-                  Text('ID: 0001  •  Контроль',
-                      style: const TextStyle(fontSize: 9, color: _kText2)),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _scaleBtn(String label, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 32, height: 32,
-        decoration: BoxDecoration(
-          color: _kBorder.withOpacity(0.4),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Center(
-          child: Text(label,
-              style: const TextStyle(
-                  fontSize: 18, color: _kText1, fontWeight: FontWeight.w600)),
-        ),
-      ),
-    );
-  }
-
-  Widget _presetBtn(
-      String label, double value, double current, SettingsProvider s) {
-    final active = (current - value).abs() < 0.05;
-    return GestureDetector(
-      onTap: () => s.setFontScale(value),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: active ? _kAccBlue.withOpacity(0.2) : Colors.transparent,
-          border: Border.all(
-              color: active ? _kAccBlue : _kBorder),
-          borderRadius: BorderRadius.circular(3),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 10,
-                color: active ? _kAccBlue : _kText2,
-                fontWeight:
-                    active ? FontWeight.w700 : FontWeight.normal)),
-      ),
-    );
-  }
-}
-
-// ── Основное BLE-устройство ────────────────────────────────────────────────
-//
-// Вместо заранее прошитых в приложении UUID сервиса/характеристик, поиск
-// концентратора теперь идёт по списку известных имён
-// (ReceiverProvider.TARGET_DEVICE_NAMES). Пользователь ищет устройство здесь,
-// выбирает нужное — оно запоминается как основное и постоянное, и при
-// следующих запусках приложение подключается к нему автоматически.
-class _PrimaryDeviceSection extends StatelessWidget {
-  final SettingsProvider settings;
+class _FoundDeviceTile extends StatelessWidget {
+  final ScanResult result;
   final ReceiverProvider receiver;
+  final SettingsProvider settings;
 
-  const _PrimaryDeviceSection({required this.settings, required this.receiver});
+  const _FoundDeviceTile({
+    required this.result,
+    required this.receiver,
+    required this.settings,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _kSurface,
-        border: Border.all(color: _kBorder),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _currentDeviceRow(context),
-          const SizedBox(height: 12),
-          if (receiver.isPairingScan) ...[
-            _scanningRow(),
-            const SizedBox(height: 12),
-          ],
-          if (receiver.pairingResults.isNotEmpty) ...[
-            ...receiver.pairingResults.map((r) => _foundDeviceTile(context, r)),
-            const SizedBox(height: 8),
-          ],
-          Row(
-            children: [
-              Expanded(
-                child: _actionBtn(
-                  label: receiver.isPairingScan ? 'Остановить поиск' : 'Найти устройство',
-                  icon: receiver.isPairingScan
-                      ? Icons.stop_circle_outlined
-                      : Icons.bluetooth_searching,
-                  color: receiver.isPairingScan ? _kAccRed : _kAccBlue,
-                  onTap: () => receiver.isPairingScan
-                      ? receiver.stopPairingScan()
-                      : receiver.startPairingScan(),
-                ),
-              ),
-              if (settings.hasPrimaryDevice) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _actionBtn(
-                    label: 'Забыть',
-                    icon: Icons.delete_outline,
-                    color: _kText2,
-                    onTap: settings.clearPrimaryDevice,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _currentDeviceRow(BuildContext context) {
-    final has = settings.hasPrimaryDevice;
-    return Row(
-      children: [
-        Icon(
-          has ? Icons.bluetooth_connected : Icons.bluetooth_disabled,
-          color: has ? _kAccGreen : _kText2,
-          size: 20,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                has ? (settings.primaryDeviceName ?? '') : 'Устройство не выбрано',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: has ? _kText1 : _kText2),
-              ),
-              if (has)
-                Text(settings.primaryDeviceId ?? '',
-                    style: const TextStyle(
-                        fontSize: 10, color: _kText2, fontFamily: 'monospace')),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _scanningRow() {
-    return Row(children: [
-      const SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2, color: _kAccBlue)),
-      const SizedBox(width: 10),
-      const Text('Поиск устройств из списка известных имён...',
-          style: TextStyle(fontSize: 12, color: _kText2)),
-    ]);
-  }
-
-  Widget _foundDeviceTile(BuildContext context, ScanResult result) {
+    final c    = appColors(context);
     final name = receiver.scanResultName(result);
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: _kPage,
-        border: Border.all(color: _kBorder),
+        color: c.page,
+        border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(
         children: [
           const Icon(Icons.hub, color: _kAccBlue, size: 16),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(name.isNotEmpty ? name : 'BLE Hub',
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w600, color: _kText1)),
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: c.text1)),
                 Text(result.device.remoteId.toString(),
-                    style: const TextStyle(
-                        fontSize: 9, color: _kText2, fontFamily: 'monospace')),
+                    style: TextStyle(
+                        fontSize: 9,
+                        color: c.text2,
+                        fontFamily: 'monospace')),
               ],
             ),
           ),
           GestureDetector(
             onTap: () => receiver.connectAsPrimaryDevice(
-              result,
-              settings.setPrimaryDevice,
-            ),
+                result, settings.setPrimaryDevice),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: _kAccGreen.withOpacity(0.15),
                 border: Border.all(color: _kAccGreen.withOpacity(0.5)),
@@ -392,20 +616,32 @@ class _PrimaryDeviceSection extends StatelessWidget {
               ),
               child: const Text('Выбрать',
                   style: TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w700, color: _kAccGreen)),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _kAccGreen)),
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _actionBtn({
-    required String label,
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
+class _BleActionBtn extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _BleActionBtn({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -421,10 +657,228 @@ class _PrimaryDeviceSection extends StatelessWidget {
             Icon(icon, size: 15, color: color),
             const SizedBox(width: 6),
             Text(label,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: color)),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final bool mono;
+
+  const _InfoRow({
+    required this.label,
+    required this.value,
+    this.valueColor,
+    this.mono = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(fontSize: 13, color: c.text2)),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 13,
+                  color: valueColor ?? c.text1,
+                  fontFamily: mono ? 'monospace' : null,
+                  fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Звук → Настройки звука
+// ════════════════════════════════════════════════════════════════════════════
+
+class SoundSettingsPage extends StatelessWidget {
+  const SoundSettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    return Scaffold(
+      backgroundColor: c.page,
+      appBar: _settingsAppBar(context, 'ЗВУК'),
+      body: Consumer<ReceiverProvider>(
+        builder: (ctx, receiver, _) {
+          return ListView(
+            children: [
+              _SectionHeader('ОПОВЕЩЕНИЯ'),
+              Container(
+                color: c.surface,
+                child: Column(
+                  children: [
+                    _SwitchRow(
+                      icon: Icons.campaign_outlined,
+                      title: 'Звук тревоги',
+                      subtitle: 'Сирена при событии тревоги (код 0x55)',
+                      value: receiver.soundEnabled,
+                      onChanged: (_) => receiver.toggleSound(),
+                    ),
+                  ],
+                ),
+              ),
+
+              _SectionHeader('ИНФОРМАЦИЯ'),
+              Container(
+                color: c.surface,
+                child: Column(
+                  children: [
+                    const _InfoRow(label: 'Тревога (0x55)',    value: 'alarm-siren.mp3'),
+                    Builder(builder: (ctx2) => Divider(height: 1, color: appColors(ctx2).border)),
+                    const _InfoRow(label: 'Разряд / вскрытие', value: 'seat-belt-unfastened.mp3'),
+                    Builder(builder: (ctx2) => Divider(height: 1, color: appColors(ctx2).border)),
+                    const _InfoRow(label: 'Аудио-поток',       value: 'Alarm (Android)'),
+                    Builder(builder: (ctx2) => Divider(height: 1, color: appColors(ctx2).border)),
+                    const _InfoRow(label: 'Тихий режим',       value: 'Игнорируется'),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SwitchRow extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _SwitchRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: _kAccBlue.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 18, color: _kAccBlue),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: c.text1)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    style: TextStyle(fontSize: 11, color: c.text2)),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: _kAccBlue,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Выбор темы — три карточки: Тёмная / Светлая / Системная
+// ════════════════════════════════════════════════════════════════════════════
+
+class _ThemePicker extends StatelessWidget {
+  final SettingsProvider settings;
+  const _ThemePicker({required this.settings});
+
+  static const _options = [
+    (ThemeMode.dark,   Icons.dark_mode_outlined,    'Тёмная'),
+    (ThemeMode.light,  Icons.light_mode_outlined,   'Светлая'),
+    (ThemeMode.system, Icons.brightness_auto,        'Системная'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final c       = appColors(context);
+    final current = settings.themeMode;
+
+    return Row(
+      children: _options.map((opt) {
+        final (mode, icon, label) = opt;
+        final active = current == mode;
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => settings.setThemeMode(mode),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: active
+                      ? _kAccBlue.withOpacity(0.15)
+                      : c.page,
+                  border: Border.all(
+                    color: active ? _kAccBlue : c.border,
+                    width: active ? 1.5 : 1,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon,
+                        size: 22,
+                        color: active ? _kAccBlue : c.text2),
+                    const SizedBox(height: 6),
+                    Text(label,
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: active
+                                ? FontWeight.w700
+                                : FontWeight.normal,
+                            color: active ? _kAccBlue : c.text2)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }

@@ -1,21 +1,10 @@
 import 'package:flutter/material.dart';
 import '../models/detector_model.dart';
+import '../theme/app_theme.dart';
 
-const _kFadeDuration = Duration(seconds: 90);
-
-// ── Palette ─────────────────────────────────────────────────────────────────
-const _kBgNormal   = Color(0xFF0A2010);
-const _kBgAlarm    = Color(0xFF2A0808);
-const _kBgDisarmed = Color(0xFF181818);
-const _kBgOff      = Color(0xFF111111);
-const _kBgBattery  = Color(0xFF2A1A06);
-const _kBorderNormal   = Color(0xFF2A6A2A);
+const _kFadeDuration   = Duration(seconds: 90);
 const _kBorderAlarm    = Color(0xFFCC2222);
-const _kBorderDisarmed = Color(0xFF383838);
 const _kBorderSelected = Color(0xFF4FC3F7);
-const _kTextPrimary    = Color(0xFFD0DDD8);
-const _kTextDim        = Color(0xFF5A7060);
-// ────────────────────────────────────────────────────────────────────────────
 
 class DetectorTile extends StatefulWidget {
   final DetectorModel detector;
@@ -63,9 +52,8 @@ class _DetectorTileState extends State<DetectorTile>
   void _syncAlarm(DetectorStatus? prev, DetectorStatus next) {
     if (next == DetectorStatus.alarm) {
       if (widget.alarmStartTime != null) {
-        final elapsed = DateTime.now()
-            .difference(widget.alarmStartTime!)
-            .inMilliseconds;
+        final elapsed =
+            DateTime.now().difference(widget.alarmStartTime!).inMilliseconds;
         _fade.value =
             (elapsed / _kFadeDuration.inMilliseconds).clamp(0.0, 1.0);
       } else {
@@ -84,49 +72,50 @@ class _DetectorTileState extends State<DetectorTile>
     super.dispose();
   }
 
-  // ── Colors ────────────────────────────────────────────────────────────────
+  // ── Colors (theme-aware) ──────────────────────────────────────────────────
 
-  Color get _bg {
+  Color _bg(AppColors c) {
     final d = widget.detector;
-    if (!d.isActive || d.status == DetectorStatus.offline) return _kBgOff;
-    if (!d.isArmed || d.status == DetectorStatus.off) return _kBgDisarmed;
+    if (!d.isActive || d.status == DetectorStatus.offline) return c.tileBgOff;
+    if (!d.isArmed || d.status == DetectorStatus.off) return c.tileBgDisarmed;
     if (d.status == DetectorStatus.alarm) {
-      return Color.lerp(_kBgAlarm, _kBgNormal, _fade.value)!;
+      return Color.lerp(c.tileBgAlarm, c.tileBgNormal, _fade.value)!;
     }
-    if (d.status == DetectorStatus.lowBattery) return _kBgBattery;
-    return _kBgNormal;
+    if (d.status == DetectorStatus.lowBattery) return c.tileBgBattery;
+    return c.tileBgNormal;
   }
 
-  Color get _border {
+  Color _border(AppColors c) {
     if (widget.isSelected) return _kBorderSelected;
     if (widget.alarmBorderActive) return _kBorderAlarm;
     final d = widget.detector;
-    if (!d.isArmed || !d.isActive) return _kBorderDisarmed;
-    return _kBorderNormal;
+    if (!d.isArmed || !d.isActive) return c.tileBorderDisarmed;
+    return c.tileBorderNormal;
   }
 
-  Color get _numColor {
+  Color _numColor(AppColors c) {
     final d = widget.detector;
-    if (!d.isArmed || !d.isActive) return _kTextDim;
+    if (!d.isArmed || !d.isActive) return c.tileTextDim;
     if (d.status == DetectorStatus.alarm) {
-      return Color.lerp(const Color(0xFFFF6666), _kTextPrimary, _fade.value)!;
+      return Color.lerp(const Color(0xFFFF6666), c.tileText, _fade.value)!;
     }
-    return _kTextPrimary;
+    return c.tileText;
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    final c = appColors(context);
     return AnimatedBuilder(
       animation: _fade,
       builder: (ctx, _) => GestureDetector(
         onTap: widget.onTap,
         child: Container(
           decoration: BoxDecoration(
-            color: _bg,
+            color: _bg(c),
             border: Border.all(
-              color: _border,
+              color: _border(c),
               width: widget.isSelected ? 2 : 1,
             ),
             borderRadius: BorderRadius.circular(4),
@@ -137,9 +126,9 @@ class _DetectorTileState extends State<DetectorTile>
               top: 6, left: 8, right: 28,
               child: Text(
                 'Зона ${widget.detector.zone}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 9, fontWeight: FontWeight.w600,
-                  color: _kTextPrimary, letterSpacing: 0.4,
+                  color: c.tileText, letterSpacing: 0.4,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -172,7 +161,7 @@ class _DetectorTileState extends State<DetectorTile>
                   style: TextStyle(
                     fontSize: 48,
                     fontWeight: FontWeight.w900,
-                    color: _numColor,
+                    color: _numColor(c),
                     height: 1,
                   ),
                 ),
@@ -188,13 +177,14 @@ class _DetectorTileState extends State<DetectorTile>
                 children: [
                   Text(
                     '${widget.detector.name} LoRa',
-                    style: const TextStyle(
-                        fontSize: 8, color: _kTextDim, letterSpacing: 0.2),
+                    style: TextStyle(
+                        fontSize: 8, color: c.tileTextDim, letterSpacing: 0.2),
                   ),
                   Text(
                     widget.detector.id,
-                    style: const TextStyle(
-                      fontSize: 8, fontFamily: 'monospace', color: _kTextDim,
+                    style: TextStyle(
+                      fontSize: 8, fontFamily: 'monospace',
+                      color: c.tileTextDim,
                     ),
                   ),
                 ],
@@ -214,7 +204,7 @@ class _DetectorTileState extends State<DetectorTile>
                     size: 13,
                     color: widget.detector.status == DetectorStatus.lowBattery
                         ? const Color(0xFFFFAA00)
-                        : _kTextDim,
+                        : c.tileTextDim,
                   ),
                   const SizedBox(width: 4),
                   Icon(
@@ -224,7 +214,7 @@ class _DetectorTileState extends State<DetectorTile>
                     size: 13,
                     color: widget.detector.status == DetectorStatus.tamper
                         ? const Color(0xFFAA44FF)
-                        : _kTextDim,
+                        : c.tileTextDim,
                   ),
                 ],
               ),

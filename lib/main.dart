@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'providers/receiver_provider.dart';
 import 'providers/settings_provider.dart';
 import 'screens/main_screen.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   runApp(const MyApp());
@@ -18,25 +19,15 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ReceiverProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()..load()),
       ],
-      child: MaterialApp(
-        title: 'Zhurin Electronics — Alarm',
-        theme: ThemeData(
-          brightness: Brightness.dark,
-          useMaterial3: true,
-          scaffoldBackgroundColor: const Color(0xFF0D1117),
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF4FC3F7),
-            brightness: Brightness.dark,
-            surface: const Color(0xFF161B22),
-          ),
-          dividerColor: const Color(0xFF2D3748),
-          dialogBackgroundColor: const Color(0xFF161B22),
-          bottomSheetTheme: const BottomSheetThemeData(
-            backgroundColor: Color(0xFF161B22),
-          ),
+      child: Consumer<SettingsProvider>(
+        builder: (_, settings, __) => MaterialApp(
+          title: 'Zhurin Electronics — Alarm',
+          theme:      AppTheme.light(),
+          darkTheme:  AppTheme.dark(),
+          themeMode:  settings.themeMode,
+          home: const MainScreen(),
+          debugShowCheckedModeBanner: false,
         ),
-        home: const MainScreen(),
-        debugShowCheckedModeBanner: false,
       ),
     );
   }

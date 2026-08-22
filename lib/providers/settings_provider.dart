@@ -1,30 +1,29 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 
 class SettingsProvider extends ChangeNotifier {
   final DatabaseService _db = DatabaseService();
 
-  double _fontScale = 1.0;
+  double    _fontScale  = 1.0;
+  ThemeMode _themeMode  = ThemeMode.dark;
+  String?   _primaryDeviceId;
+  String?   _primaryDeviceName;
 
-  // Основное (постоянное) BLE-устройство, выбранное пользователем на
-  // экране настроек. Сохраняется во "временной" локальной базе (таблица
-  // settings) и используется для автоматического подключения при
-  // следующих запусках приложения — без повторного ручного поиска.
-  String? _primaryDeviceId;
-  String? _primaryDeviceName;
-
-  double get fontScale => _fontScale;
-  String? get primaryDeviceId => _primaryDeviceId;
-  String? get primaryDeviceName => _primaryDeviceName;
-  bool get hasPrimaryDevice => _primaryDeviceId != null && _primaryDeviceId!.isNotEmpty;
+  double    get fontScale        => _fontScale;
+  ThemeMode get themeMode        => _themeMode;
+  String?   get primaryDeviceId  => _primaryDeviceId;
+  String?   get primaryDeviceName => _primaryDeviceName;
+  bool get hasPrimaryDevice =>
+      _primaryDeviceId != null && _primaryDeviceId!.isNotEmpty;
 
   Future<void> load() async {
-    final v = await _db.getSetting('fontScale');
-    if (v != null) {
-      _fontScale = double.tryParse(v) ?? 1.0;
-    }
+    final scale = await _db.getSetting('fontScale');
+    if (scale != null) _fontScale = double.tryParse(scale) ?? 1.0;
 
-    _primaryDeviceId = await _db.getSetting('primaryDeviceId');
+    final theme = await _db.getSetting('themeMode');
+    _themeMode = _parseThemeMode(theme);
+
+    _primaryDeviceId   = await _db.getSetting('primaryDeviceId');
     _primaryDeviceName = await _db.getSetting('primaryDeviceName');
 
     notifyListeners();
@@ -36,24 +35,39 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Запомнить устройство как основное. Вызывается после успешного
-  // подключения к устройству, выбранному пользователем на экране настроек
-  // из списка найденных по имени (TARGET_DEVICE_NAMES) устройств.
+  Future<void> setThemeMode(ThemeMode mode) async {
+    _themeMode = mode;
+    await _db.saveSetting('themeMode', _themeModeKey(mode));
+    notifyListeners();
+  }
+
   Future<void> setPrimaryDevice(String remoteId, String name) async {
-    _primaryDeviceId = remoteId;
+    _primaryDeviceId   = remoteId;
     _primaryDeviceName = name;
     await _db.saveSetting('primaryDeviceId', remoteId);
     await _db.saveSetting('primaryDeviceName', name);
     notifyListeners();
   }
 
-  // "Забыть" сохранённое основное устройство — например, чтобы выбрать
-  // другой концентратор.
   Future<void> clearPrimaryDevice() async {
-    _primaryDeviceId = null;
+    _primaryDeviceId   = null;
     _primaryDeviceName = null;
     await _db.deleteSetting('primaryDeviceId');
     await _db.deleteSetting('primaryDeviceName');
     notifyListeners();
   }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  static String _themeModeKey(ThemeMode m) => switch (m) {
+        ThemeMode.light  => 'light',
+        ThemeMode.dark   => 'dark',
+        ThemeMode.system => 'system',
+      };
+
+  static ThemeMode _parseThemeMode(String? s) => switch (s) {
+        'light'  => ThemeMode.light,
+        'system' => ThemeMode.system,
+        _        => ThemeMode.dark,
+      };
 }

@@ -9,19 +9,15 @@ import '../models/event_model.dart';
 import '../providers/receiver_provider.dart';
 import '../providers/settings_provider.dart';
 import '../screens/settings_screen.dart';
+import '../theme/app_theme.dart';
+import '../widgets/export_sheet.dart';
 import '../widgets/detector_tile.dart';
 
-// ── Palette ──────────────────────────────────────────────────────────────────
-const _kPage     = Color(0xFF0D1117);
-const _kSurface  = Color(0xFF161B22);
-const _kBorder   = Color(0xFF2D3748);
-const _kText1    = Color(0xFFD0DDD8);
-const _kText2    = Color(0xFF6A8090);
-const _kAccBlue  = Color(0xFF4FC3F7);
-const _kAccGreen = Color(0xFF34A853);
-const _kAccRed   = Color(0xFFEA4335);
-const _kAccAmber = Color(0xFFFBBC04);
-// ─────────────────────────────────────────────────────────────────────────────
+// Accent colours are theme-independent (same in light & dark).
+const _kAccBlue  = kAccBlue;
+const _kAccGreen = kAccGreen;
+const _kAccRed   = kAccRed;
+const _kAccAmber = kAccAmber;
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -71,7 +67,7 @@ class _MainScreenState extends State<MainScreen> {
         data: MediaQuery.of(ctx).copyWith(
             textScaler: TextScaler.linear(settings.fontScale)),
         child: Scaffold(
-          backgroundColor: _kPage,
+          backgroundColor: appColors(ctx).page,
           body: SafeArea(
             child: Column(
               children: [
@@ -109,12 +105,14 @@ class _MainScreenState extends State<MainScreen> {
 
   Widget _buildGrid(ReceiverProvider prov) {
     if (prov.detectors.isEmpty) {
-      return Center(
+      return Builder(builder: (context) {
+        final c = appColors(context);
+        return Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.sensors_off, size: 48, color: _kText2.withOpacity(0.4)),
+          Icon(Icons.sensors_off, size: 48, color: c.text2.withOpacity(0.4)),
           const SizedBox(height: 12),
           Text('Нет подключённых извещателей',
-              style: TextStyle(color: _kText2, fontSize: 13)),
+              style: TextStyle(color: c.text2, fontSize: 13)),
           const SizedBox(height: 12),
           if (!prov.isConnected)
             _OutlineBtn(
@@ -124,6 +122,7 @@ class _MainScreenState extends State<MainScreen> {
             ),
         ]),
       );
+      });
     }
 
     return Padding(
@@ -183,9 +182,10 @@ class _MainScreenState extends State<MainScreen> {
   // ── Connection dialog ─────────────────────────────────────────────────────
 
   void _showConnectionDialog(BuildContext ctx, ReceiverProvider prov) {
+    final c = appColors(ctx);
     showModalBottomSheet(
       context: ctx,
-      backgroundColor: _kSurface,
+      backgroundColor: c.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
       isScrollControlled: true,
@@ -194,14 +194,14 @@ class _MainScreenState extends State<MainScreen> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 36, height: 3,
               decoration: BoxDecoration(
-                  color: _kBorder, borderRadius: BorderRadius.circular(2))),
+                  color: c.border, borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
           Text('УПРАВЛЕНИЕ ПОДКЛЮЧЕНИЕМ',
               style: TextStyle(fontSize: 11, letterSpacing: 2,
-                  fontWeight: FontWeight.w700, color: _kText2)),
+                  fontWeight: FontWeight.w700, color: c.text2)),
           const SizedBox(height: 16),
           if (prov.isConnected) ...[
-            _statusRow(Icons.bluetooth_connected, _kAccGreen,
+            _statusRow(ctx, Icons.bluetooth_connected, _kAccGreen,
                 prov.connectedHub?.platformName ?? 'BLE Alarm Hub',
                 prov.connectedHub?.remoteId.toString() ?? ''),
             const SizedBox(height: 16),
@@ -220,7 +220,7 @@ class _MainScreenState extends State<MainScreen> {
                       color: _kAccBlue)),
               const SizedBox(width: 12),
               Text('Поиск концентраторов...',
-                  style: TextStyle(color: _kText2)),
+                  style: TextStyle(color: c.text2)),
             ]),
           ] else ...[
             _DarkBtn(
@@ -236,10 +236,10 @@ class _MainScreenState extends State<MainScreen> {
                 leading: const Icon(Icons.hub, color: _kAccBlue, size: 18),
                 title: Text(
                   hub.platformName.isNotEmpty ? hub.platformName : 'BLE Hub',
-                  style: const TextStyle(color: _kText1, fontSize: 13),
+                  style: TextStyle(color: c.text1, fontSize: 13),
                 ),
                 subtitle: Text(hub.remoteId.toString(),
-                    style: const TextStyle(color: _kText2, fontSize: 10)),
+                    style: TextStyle(color: c.text2, fontSize: 10)),
                 trailing: _DarkBtn(
                   label: 'Подключить',
                   color: _kAccGreen,
@@ -257,13 +257,14 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  Widget _statusRow(IconData icon, Color color, String title, String sub) {
+  Widget _statusRow(BuildContext ctx, IconData icon, Color color, String title, String sub) {
+    final c = appColors(ctx);
     return Row(children: [
       Icon(icon, color: color, size: 18),
       const SizedBox(width: 10),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: TextStyle(color: _kText1, fontSize: 13)),
-        Text(sub, style: TextStyle(color: _kText2, fontSize: 10)),
+        Text(title, style: TextStyle(color: c.text1, fontSize: 13)),
+        Text(sub, style: TextStyle(color: c.text2, fontSize: 10)),
       ]),
     ]);
   }
@@ -311,38 +312,39 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = appColors(context);
     return Container(
       height: 50,
-      color: _kSurface,
+      color: c.surface,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(children: [
         // Logo
         Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Text('ZHURIN',
+          children: [
+            const Text('ZHURIN',
                 style: TextStyle(
                     fontSize: 15, fontWeight: FontWeight.w900,
                     color: _kAccBlue, letterSpacing: 2.5, height: 1)),
             Text('ELECTRONICS',
                 style: TextStyle(
-                    fontSize: 7, color: _kText2,
+                    fontSize: 7, color: c.text2,
                     letterSpacing: 1.8, height: 1)),
           ],
         ),
         Container(
             margin: const EdgeInsets.symmetric(horizontal: 14),
-            width: 1, height: 30, color: _kBorder),
+            width: 1, height: 30, color: c.border),
 
         // Status chips
-        _chip('ТРЕВОГА', provider.alarmDetectors,    _kAccRed),
+        _chip(context, 'ТРЕВОГА', provider.alarmDetectors,    _kAccRed),
         const SizedBox(width: 5),
-        _chip('НОРМА',   _normalCount,                _kAccGreen),
+        _chip(context, 'НОРМА',   _normalCount,                _kAccGreen),
         const SizedBox(width: 5),
-        _chip('ОХРАНА',  _armedCount,                 _kAccBlue.withOpacity(0.9)),
+        _chip(context, 'ОХРАНА',  _armedCount,                 _kAccBlue.withOpacity(0.9)),
         const SizedBox(width: 5),
-        _chip('НЕТ СВ.', provider.offlineDetectors,  _kText2),
+        _chip(context, 'НЕТ СВ.', provider.offlineDetectors,  c.text2),
 
         const Spacer(),
 
@@ -359,7 +361,7 @@ class _TopBar extends StatelessWidget {
         // Sound toggle
         _iconBtn(
           provider.soundEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-          provider.soundEnabled ? _kAccBlue : _kText2,
+          provider.soundEnabled ? _kAccBlue : c.text2,
           provider.toggleSound,
         ),
 
@@ -384,8 +386,8 @@ class _TopBar extends StatelessWidget {
             ),
             child: Text(
               _armedAll ? '🔒  ОХРАНА' : '🔓  СНЯТО',
-              style: const TextStyle(fontSize: 10, letterSpacing: 0.5,
-                  color: _kText1),
+              style: TextStyle(fontSize: 10, letterSpacing: 0.5,
+                  color: c.text1),
             ),
           ),
         ),
@@ -395,12 +397,12 @@ class _TopBar extends StatelessWidget {
           provider.isConnected
               ? Icons.bluetooth_connected
               : Icons.bluetooth_searching,
-          provider.isConnected ? _kAccBlue : _kText2,
+          provider.isConnected ? _kAccBlue : c.text2,
           onConnect,
         ),
 
         // Settings button
-        _iconBtn(Icons.settings_outlined, _kText2, onSettings),
+        _iconBtn(Icons.settings_outlined, c.text2, onSettings),
       ]),
     );
   }
@@ -412,7 +414,7 @@ class _TopBar extends StatelessWidget {
   bool get _armedAll   => provider.detectors.isNotEmpty &&
       provider.detectors.every((d) => d.isArmed);
 
-  Widget _chip(String label, int count, Color color) {
+  Widget _chip(BuildContext ctx, String label, int count, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
@@ -467,15 +469,16 @@ class _RightPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = appColors(context);
     return Container(
       width: 290,
-      decoration: const BoxDecoration(
-        color: _kSurface,
-        border: Border(left: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(left: BorderSide(color: c.border)),
       ),
       child: Column(children: [
         // Header
-        _panelHeader(),
+        _panelHeader(context),
         // Detector detail
         if (_selected != null) ...[
           _DetectorDetail(
@@ -485,7 +488,7 @@ class _RightPanel extends StatelessWidget {
               onArm:   () => provider.armDetector(_selected!.id),
               onDisarm:() => provider.disarmDetector(_selected!.id),
               onReset: () => provider.disarmDetectorAlarm(_selected!.id)),
-          const Divider(height: 1, color: _kBorder),
+          Divider(height: 1, color: c.border),
         ],
         // Event log
         Expanded(child: _EventLog(
@@ -505,21 +508,22 @@ class _RightPanel extends StatelessWidget {
     return provider.events.take(150).toList();
   }
 
-  Widget _panelHeader() {
+  Widget _panelHeader(BuildContext context) {
+    final c = appColors(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: _kBorder))),
+      decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: c.border))),
       child: Row(children: [
-        const Text('ПАНЕЛЬ',
+        Text('ПАНЕЛЬ',
             style: TextStyle(
                 fontSize: 9, fontWeight: FontWeight.w700,
-                letterSpacing: 1.8, color: _kText2)),
+                letterSpacing: 1.8, color: c.text2)),
         const Spacer(),
         if (selectedId != null)
           GestureDetector(
             onTap: onClose,
-            child: const Icon(Icons.close_rounded, size: 14, color: _kText2),
+            child: Icon(Icons.close_rounded, size: 14, color: c.text2),
           ),
       ]),
     );
@@ -545,7 +549,11 @@ class _DetectorDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c  = appColors(context);
     final sc = detector.statusColor;
+    final hasAlarm = alarmBorderActive ||
+        detector.status == DetectorStatus.alarm ||
+        detector.status == DetectorStatus.tamper;
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -565,9 +573,9 @@ class _DetectorDetail extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('${detector.name}  [${detector.id}]',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w700,
-                      color: _kText1),
+                      color: c.text1),
                   overflow: TextOverflow.ellipsis),
               Text(detector.statusText,
                   style: TextStyle(fontSize: 10, color: sc)),
@@ -575,70 +583,62 @@ class _DetectorDetail extends StatelessWidget {
           )),
         ]),
         const SizedBox(height: 10),
-        _row('Модель',  '${detector.name} LoRa'),
-        _row('Зона',    'Зона ${detector.zone}'),
-        _row('Событие', detector.lastEventText),
-        _row('Связь',   _ago(detector.lastSeen)),
-        _row('Тревог',  '${detector.alarmCount}'),
+        _row(c, 'Модель',  '${detector.name} LoRa'),
+        _row(c, 'Зона',    'Зона ${detector.zone}'),
+        _row(c, 'Событие', detector.lastEventText),
+        _row(c, 'Связь',   _ago(detector.lastSeen)),
+        _row(c, 'Тревог',  '${detector.alarmCount}'),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _btn(
+          Expanded(child: _btn(c,
             detector.isArmed ? 'Снять' : 'На охрану',
-            detector.isArmed ? const Color(0xFF6A2A00) : const Color(0xFF1A5A1A),
+            detector.isArmed ? c.detailBtnDisarm : c.detailBtnArm,
             detector.isArmed ? onDisarm : onArm,
           )),
           const SizedBox(width: 8),
-          Expanded(child: _btn(
+          Expanded(child: _btn(c,
             'Сброс',
-            alarmBorderActive ||
-                    detector.status == DetectorStatus.alarm ||
-                    detector.status == DetectorStatus.tamper
-                ? const Color(0xFF5A1010)
-                : const Color(0xFF1E1E1E),
-            alarmBorderActive ||
-                    detector.status == DetectorStatus.alarm ||
-                    detector.status == DetectorStatus.tamper
-                ? onReset
-                : null,
+            hasAlarm ? kAccRed.withOpacity(0.2) : c.detailBtnInactive,
+            hasAlarm ? onReset : null,
           )),
         ]),
       ]),
     );
   }
 
-  Widget _row(String label, String value) {
+  Widget _row(AppColors c, String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(children: [
         SizedBox(
             width: 58,
             child: Text(label,
-                style: const TextStyle(fontSize: 9, color: _kText2))),
+                style: TextStyle(fontSize: 9, color: c.text2))),
         Expanded(
             child: Text(value,
-                style: const TextStyle(fontSize: 9, color: _kText1),
+                style: TextStyle(fontSize: 9, color: c.text1),
                 overflow: TextOverflow.ellipsis)),
       ]),
     );
   }
 
-  Widget _btn(String label, Color bg, VoidCallback? onTap) {
+  Widget _btn(AppColors c, String label, Color bg, VoidCallback? onTap) {
     final active = onTap != null;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 6),
         decoration: BoxDecoration(
-          color: active ? bg : const Color(0xFF1A1A1A),
+          color: active ? bg : c.detailBtnInactive,
           borderRadius: BorderRadius.circular(3),
           border: Border.all(
-              color: active ? bg : const Color(0xFF2A2A2A)),
+              color: active ? bg : c.detailBtnInactiveBorder),
         ),
         child: Text(label,
             textAlign: TextAlign.center,
             style: TextStyle(
                 fontSize: 10, fontWeight: FontWeight.w600,
-                color: active ? _kText1 : const Color(0xFF3A3A3A))),
+                color: active ? c.text1 : c.detailBtnInactiveText)),
       ),
     );
   }
@@ -660,20 +660,28 @@ class _EventLog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = appColors(context);
     return Column(children: [
       // Log header
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _kBorder))),
+        decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: c.border))),
         child: Row(children: [
-          const Text('ЖУРНАЛ СОБЫТИЙ',
+          Text('ЖУРНАЛ СОБЫТИЙ',
               style: TextStyle(
                   fontSize: 8, fontWeight: FontWeight.w700,
-                  letterSpacing: 1.6, color: _kText2)),
+                  letterSpacing: 1.6, color: c.text2)),
           const Spacer(),
           Text('${events.length}',
-              style: const TextStyle(fontSize: 9, color: _kText2)),
+              style: TextStyle(fontSize: 9, color: c.text2)),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: events.isEmpty ? null : () => ExportSheet.show(context),
+            child: Icon(Icons.share_outlined,
+                size: 15,
+                color: events.isEmpty ? c.text2.withOpacity(0.3) : c.text2),
+          ),
         ]),
       ),
       // Events list
@@ -682,7 +690,7 @@ class _EventLog extends StatelessWidget {
             ? Center(
                 child: Text('Нет событий',
                     style: TextStyle(
-                        fontSize: 12, color: _kText2.withOpacity(0.5))))
+                        fontSize: 12, color: c.text2.withOpacity(0.5))))
             : ListView.builder(
                 padding: EdgeInsets.zero,
                 itemCount: events.length,
@@ -699,12 +707,12 @@ class _EventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c     = appColors(context);
     final color = event.color;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: const BoxDecoration(
-          border:
-              Border(bottom: BorderSide(color: Color(0xFF1A2030), width: 0.5))),
+      decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: c.eventRowDivider, width: 0.5))),
       child: Row(children: [
         Container(
           width: 3, height: 28,
@@ -716,11 +724,11 @@ class _EventRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(event.description,
-                style: const TextStyle(fontSize: 10, color: _kText1),
+                style: TextStyle(fontSize: 10, color: c.text1),
                 overflow: TextOverflow.ellipsis),
             Text(
               DateFormat('dd.MM  HH:mm:ss').format(event.timestamp),
-              style: const TextStyle(fontSize: 8, color: _kText2),
+              style: TextStyle(fontSize: 8, color: c.text2),
             ),
           ],
         )),
@@ -764,12 +772,13 @@ class _BottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = appColors(context);
     return Container(
       height: 28,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-          color: _kPage,
-          border: Border(top: BorderSide(color: _kBorder))),
+      decoration: BoxDecoration(
+          color: c.page,
+          border: Border(top: BorderSide(color: c.border))),
       child: Row(children: [
         _item(
           provider.isConnected
@@ -778,22 +787,22 @@ class _BottomBar extends StatelessWidget {
           provider.isConnected
               ? (provider.connectedHub?.platformName ?? 'BLE')
               : 'Нет связи',
-          provider.isConnected ? _kAccBlue : _kText2,
+          provider.isConnected ? _kAccBlue : c.text2,
         ),
-        _div(),
+        _div(c),
         _item(Icons.sensors_rounded,
-            '${provider.totalDetectors} датч.', _kText2),
-        _div(),
+            '${provider.totalDetectors} датч.', c.text2),
+        _div(c),
         _item(Icons.warning_amber_rounded,
             '${provider.alarmDetectors} тревог',
-            provider.alarmDetectors > 0 ? _kAccRed : _kText2),
-        _div(),
+            provider.alarmDetectors > 0 ? _kAccRed : c.text2),
+        _div(c),
         _item(Icons.no_photography_outlined,
-            '${provider.offlineDetectors} нет св.', _kText2),
+            '${provider.offlineDetectors} нет св.', c.text2),
         const Spacer(),
-        const _ClockText(
+        _ClockText(
           format: 'dd.MM.yyyy',
-          style: TextStyle(fontSize: 9, color: _kText2),
+          style: TextStyle(fontSize: 9, color: c.text2),
         ),
       ]),
     );
@@ -807,9 +816,9 @@ class _BottomBar extends StatelessWidget {
     ]);
   }
 
-  Widget _div() => Container(
+  Widget _div(AppColors c) => Container(
       margin: const EdgeInsets.symmetric(horizontal: 10),
-      width: 1, height: 12, color: _kBorder);
+      width: 1, height: 12, color: c.border);
 }
 
 // ── Shared UI helpers ─────────────────────────────────────────────────────────
@@ -828,7 +837,7 @@ class _OutlineBtn extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          border: Border.all(color: _kAccBlue.withOpacity(0.5)),
+          border: Border.all(color: kAccBlue.withOpacity(0.5)),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
