@@ -9,6 +9,7 @@ import '../models/event_model.dart';
 import '../providers/receiver_provider.dart';
 import '../providers/settings_provider.dart';
 import '../screens/settings_screen.dart';
+import '../screens/help_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/export_sheet.dart';
 import '../widgets/detector_tile.dart';
@@ -74,6 +75,8 @@ class _MainScreenState extends State<MainScreen> {
                 _TopBar(
                   provider: prov,
                   onConnect: () => _showConnectionDialog(ctx, prov),
+                  onHelp: () => Navigator.push(ctx,
+                      MaterialPageRoute(builder: (_) => const HelpScreen())),
                   onSettings: () => Navigator.push(ctx,
                       MaterialPageRoute(builder: (_) => const SettingsScreen())),
                 ),
@@ -391,9 +394,15 @@ class _ClockTextState extends State<_ClockText> {
 class _TopBar extends StatelessWidget {
   final ReceiverProvider provider;
   final VoidCallback onConnect;
+  final VoidCallback onHelp;
   final VoidCallback onSettings;
 
-  const _TopBar({required this.provider, required this.onConnect, required this.onSettings});
+  const _TopBar({
+    required this.provider,
+    required this.onConnect,
+    required this.onHelp,
+    required this.onSettings,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -485,6 +494,9 @@ class _TopBar extends StatelessWidget {
           provider.isConnected ? _kAccBlue : c.text2,
           onConnect,
         ),
+
+        // Help button
+        _iconBtn(Icons.help_outline, c.text2, onHelp),
 
         // Settings button
         _iconBtn(Icons.settings_outlined, c.text2, onSettings),

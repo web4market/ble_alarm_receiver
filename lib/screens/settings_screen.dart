@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/receiver_provider.dart';
 import '../theme/app_theme.dart';
+import 'help_screen.dart';
 
 // Accent colours are stable across themes.
 const _kAccBlue  = kAccBlue;
@@ -149,6 +150,14 @@ class SettingsScreen extends StatelessWidget {
                 subtitle: receiver.soundEnabled ? 'Включён' : 'Выключен',
                 onTap: () => Navigator.push(ctx,
                     MaterialPageRoute(builder: (_) => const SoundSettingsPage())),
+              ),
+              _SectionHeader('ИНФОРМАЦИЯ'),
+              _SettingsRow(
+                icon: Icons.help_outline,
+                title: 'Помощь',
+                subtitle: 'Инструкция, поддержка, документация',
+                onTap: () => Navigator.push(ctx,
+                    MaterialPageRoute(builder: (_) => const HelpScreen())),
               ),
             ],
           );
