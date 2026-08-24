@@ -12,6 +12,7 @@ class DetectorModel {
   DetectorStatus status;
   DateTime lastSeen;
   int zone;
+  String place;   // конкретное место в зоне: окно, калитка, дверь и т.д.
   bool isActive;
   int alarmCount;
   bool isArmed;
@@ -25,6 +26,7 @@ class DetectorModel {
     this.status = DetectorStatus.normal,
     DateTime? lastSeen,
     this.zone = 1,
+    this.place = '',
     this.isActive = true,
     this.alarmCount = 0,
     this.isArmed = true,
@@ -98,6 +100,7 @@ class DetectorModel {
     DetectorStatus? status,
     DateTime? lastSeen,
     int? zone,
+    String? place,
     bool? isActive,
     int? alarmCount,
     bool? isArmed,
@@ -111,6 +114,7 @@ class DetectorModel {
       status:        status        ?? this.status,
       lastSeen:      lastSeen      ?? this.lastSeen,
       zone:          zone          ?? this.zone,
+      place:         place         ?? this.place,
       isActive:      isActive      ?? this.isActive,
       alarmCount:    alarmCount    ?? this.alarmCount,
       isArmed:       isArmed       ?? this.isArmed,
@@ -127,6 +131,7 @@ class DetectorModel {
     'status':        status.index,
     'lastSeen':      lastSeen.toIso8601String(),
     'zone':          zone,
+    'place':         place,
     'isActive':      isActive ? 1 : 0,
     'alarmCount':    alarmCount,
     'isArmed':       isArmed ? 1 : 0,
@@ -142,6 +147,7 @@ class DetectorModel {
       status:        DetectorStatus.values[json['status'] ?? 0],
       lastSeen:      DateTime.parse(json['lastSeen']),
       zone:          json['zone'] ?? 1,
+      place:         json['place'] ?? '',
       isActive:      json['isActive'] == 1,
       alarmCount:    json['alarmCount'] ?? 0,
       isArmed:       json['isArmed'] == 1,

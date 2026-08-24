@@ -14,6 +14,7 @@ class ReceiverProvider extends ChangeNotifier {
   List<BluetoothDevice> _discoveredHubs = [];
   List<DetectorModel> _detectors = [];
   List<EventModel> _events = [];
+  Map<int, String> _zoneNames = {};
   final DatabaseService _db = DatabaseService();
   final AudioService _audio = AudioService();
   StreamSubscription? _scanSubscription;
@@ -74,6 +75,30 @@ class ReceiverProvider extends ChangeNotifier {
   Map<String, bool> get alarmBorderActive =>
       Map.unmodifiable(_alarmBorderActive);
   bool get soundEnabled => _soundEnabled;
+  Map<int, String> get zoneNames => Map.unmodifiable(_zoneNames);
+
+  // Название зоны: пользовательское, если задано, иначе "Зона N" по умолчанию.
+  String zoneName(int zone) => _zoneNames[zone] ?? 'Зона $zone';
+
+  // Переименовать зону
+  Future<void> renameZone(int zone, String name) async {
+    final trimmed = name.trim();
+    final effective = trimmed.isEmpty ? 'Зона $zone' : trimmed;
+    _zoneNames[zone] = effective;
+    notifyListeners();
+    await _db.renameZone(zone, effective);
+  }
+
+  // Задать/изменить название места конкретного извещателя (окно, калитка,
+  // дверь и т.д.)
+  Future<void> renamePlace(String detectorId, String place) async {
+    final index = _detectors.indexWhere((d) => d.id == detectorId);
+    if (index == -1) return;
+    final trimmed = place.trim();
+    _detectors[index].place = trimmed;
+    notifyListeners();
+    await _db.updateDetectorPlace(detectorId, trimmed);
+  }
 
   void toggleSound() {
     _soundEnabled = !_soundEnabled;
@@ -103,6 +128,7 @@ class ReceiverProvider extends ChangeNotifier {
   Future<void> _loadData() async {
     _detectors = await _db.getDetectors();
     _events = await _db.getEvents(limit: 200);
+    _zoneNames = await _db.getZoneNames();
     notifyListeners();
   }
 
@@ -919,9 +945,9 @@ class ReceiverProvider extends ChangeNotifier {
       timestamp: DateTime.now(),
       type: EventType.zoneArmed,
       detectorId: 'zone_$zone',
-      detectorName: 'Зона $zone',
+      detectorName: zoneName(zone),
       description:
-          'Зона $zone поставлена на охрану (${zoneDetectors.length} извещателей)',
+          '${zoneName(zone)} поставлена на охрану (${zoneDetectors.length} извещателей)',
     ));
 
     notifyListeners();
@@ -947,9 +973,9 @@ class ReceiverProvider extends ChangeNotifier {
       timestamp: DateTime.now(),
       type: EventType.zoneDisarmed,
       detectorId: 'zone_$zone',
-      detectorName: 'Зона $zone',
+      detectorName: zoneName(zone),
       description:
-          'Зона $zone снята с охраны (${zoneDetectors.length} извещателей)',
+          '${zoneName(zone)} снята с охраны (${zoneDetectors.length} извещателей)',
     ));
 
     notifyListeners();

@@ -20,7 +20,7 @@ class DatabaseService {
     String path = join(await getDatabasesPath(), 'alarm_receiver.db');
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -36,6 +36,7 @@ class DatabaseService {
         status INTEGER,
         lastSeen TEXT,
         zone INTEGER,
+        place TEXT,
         isActive INTEGER,
         alarmCount INTEGER,
         isArmed INTEGER,
@@ -93,6 +94,10 @@ class DatabaseService {
       // Добавляем новые поля протокола; старые batteryLevel/parameters остаются, но не используются
       try { await db.execute('ALTER TABLE detectors ADD COLUMN nodeType INTEGER DEFAULT 0'); } catch (_) {}
       try { await db.execute('ALTER TABLE detectors ADD COLUMN lastEventCode INTEGER DEFAULT 170'); } catch (_) {}
+    }
+    if (oldVersion < 4) {
+      // Пользовательское название конкретного места извещателя (окно, калитка, дверь и т.д.)
+      try { await db.execute("ALTER TABLE detectors ADD COLUMN place TEXT DEFAULT ''"); } catch (_) {}
     }
   }
 
@@ -158,6 +163,17 @@ class DatabaseService {
     );
   }
 
+  // Обновить название места извещателя (окно, калитка, дверь и т.д.)
+  Future<void> updateDetectorPlace(String id, String place) async {
+    final db = await database;
+    await db.update(
+      'detectors',
+      {'place': place},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   // Обновить состояние охраны извещателя
   Future<void> updateDetectorArmed(String id, bool isArmed) async {
     final db = await database;
@@ -191,6 +207,34 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getZones() async {
     final db = await database;
     return await db.query('zones', orderBy: 'id');
+  }
+
+  // Получить названия всех зон в виде Map<id, name>
+  Future<Map<int, String>> getZoneNames() async {
+    final zones = await getZones();
+    return {
+      for (final z in zones) z['id'] as int: (z['name'] as String?) ?? 'Зона ${z['id']}',
+    };
+  }
+
+  // Переименовать зону (пользовательское название). Если строка зоны ещё
+  // не существует (например, извещатель сослался на зону, для которой нет
+  // записи по умолчанию) — создаём её.
+  Future<void> renameZone(int zone, String name) async {
+    final db = await database;
+    final updated = await db.update(
+      'zones',
+      {'name': name},
+      where: 'id = ?',
+      whereArgs: [zone],
+    );
+    if (updated == 0) {
+      await db.insert(
+        'zones',
+        {'id': zone, 'name': name, 'isArmed': 1},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
   }
 
   // Сохранить событие

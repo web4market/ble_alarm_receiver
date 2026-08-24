@@ -12,8 +12,12 @@ class DetectorTile extends StatefulWidget {
   final bool alarmBorderActive;
   final DateTime? alarmStartTime;
   final bool isSelected;
+  final String? zoneName;
+  final String? place;
   final VoidCallback? onTap;
   final VoidCallback? onResetAlarm;
+  final VoidCallback? onEditZone;
+  final VoidCallback? onEditPlace;
 
   const DetectorTile({
     super.key,
@@ -22,8 +26,12 @@ class DetectorTile extends StatefulWidget {
     required this.alarmBorderActive,
     this.alarmStartTime,
     this.isSelected = false,
+    this.zoneName,
+    this.place,
     this.onTap,
     this.onResetAlarm,
+    this.onEditZone,
+    this.onEditPlace,
   });
 
   @override
@@ -102,6 +110,41 @@ class _DetectorTileState extends State<DetectorTile>
     return c.tileText;
   }
 
+  // ── Small tappable label (zone / place, top-left) ───────────────────────────
+
+  Widget _editableLabel({
+    required String text,
+    required Color color,
+    required double fontSize,
+    FontWeight fontWeight = FontWeight.w500,
+    FontStyle fontStyle = FontStyle.normal,
+    VoidCallback? onTap,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: fontSize, fontWeight: fontWeight,
+                fontStyle: fontStyle, color: color, letterSpacing: 0.4,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (onTap != null) ...[
+            const SizedBox(width: 3),
+            Icon(Icons.edit, size: fontSize - 1, color: color),
+          ],
+        ],
+      ),
+    );
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -121,16 +164,32 @@ class _DetectorTileState extends State<DetectorTile>
             borderRadius: BorderRadius.circular(4),
           ),
           child: Stack(children: [
-            // Zone label — top left
+            // Zone + place labels — top left (tap either to rename)
             Positioned(
-              top: 6, left: 8, right: 28,
-              child: Text(
-                'Зона ${widget.detector.zone}',
-                style: TextStyle(
-                  fontSize: 9, fontWeight: FontWeight.w600,
-                  color: c.tileText, letterSpacing: 0.4,
-                ),
-                overflow: TextOverflow.ellipsis,
+              top: 5, left: 8, right: 28,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _editableLabel(
+                    text: widget.zoneName ?? 'Зона ${widget.detector.zone}',
+                    color: c.tileText,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    onTap: widget.onEditZone,
+                  ),
+                  _editableLabel(
+                    text: (widget.place == null || widget.place!.isEmpty)
+                        ? 'Место'
+                        : widget.place!,
+                    color: c.tileTextDim,
+                    fontSize: 7.5,
+                    fontStyle: (widget.place == null || widget.place!.isEmpty)
+                        ? FontStyle.italic
+                        : FontStyle.normal,
+                    onTap: widget.onEditPlace,
+                  ),
+                ],
               ),
             ),
 

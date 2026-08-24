@@ -153,6 +153,10 @@ class _MainScreenState extends State<MainScreen> {
               alarmBorderActive: prov.alarmBorderActive[d.id] ?? false,
               alarmStartTime:   prov.alarmStartTimes[d.id],
               isSelected:       _selectedId == d.id,
+              zoneName:         prov.zoneName(d.zone),
+              place:            d.place,
+              onEditZone: () => _showRenameZoneDialog(context, prov, d.zone),
+              onEditPlace: () => _showRenamePlaceDialog(context, prov, d),
               onTap: () {
                 final hasAlarm = (prov.alarmBorderActive[d.id] ?? false) ||
                     d.status == DetectorStatus.alarm ||
@@ -177,6 +181,87 @@ class _MainScreenState extends State<MainScreen> {
     if (n <= 6)  return 3;
     if (n <= 12) return 4;
     return 5;
+  }
+
+  // ── Rename zone dialog ────────────────────────────────────────────────────
+
+  void _showRenameZoneDialog(BuildContext ctx, ReceiverProvider prov, int zone) {
+    final c = appColors(ctx);
+    final controller = TextEditingController(text: prov.zoneName(zone));
+    showDialog(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: const Text('Название зоны'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 40,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            hintText: 'Например: Вход, Гараж, Спальня',
+          ),
+          onSubmitted: (value) {
+            prov.renameZone(zone, value);
+            Navigator.pop(dialogCtx);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () {
+              prov.renameZone(zone, controller.text);
+              Navigator.pop(dialogCtx);
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Rename place dialog ───────────────────────────────────────────────────
+
+  void _showRenamePlaceDialog(
+      BuildContext ctx, ReceiverProvider prov, DetectorModel detector) {
+    final c = appColors(ctx);
+    final controller = TextEditingController(text: detector.place);
+    showDialog(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: const Text('Место установки'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 40,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            hintText: 'Например: Окно, калитка, дверь',
+          ),
+          onSubmitted: (value) {
+            prov.renamePlace(detector.id, value);
+            Navigator.pop(dialogCtx);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () {
+              prov.renamePlace(detector.id, controller.text);
+              Navigator.pop(dialogCtx);
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Connection dialog ─────────────────────────────────────────────────────
@@ -483,6 +568,7 @@ class _RightPanel extends StatelessWidget {
         if (_selected != null) ...[
           _DetectorDetail(
               detector: _selected!,
+              zoneName: provider.zoneName(_selected!.zone),
               alarmBorderActive:
                   provider.alarmBorderActive[_selected!.id] ?? false,
               onArm:   () => provider.armDetector(_selected!.id),
@@ -534,6 +620,7 @@ class _RightPanel extends StatelessWidget {
 
 class _DetectorDetail extends StatelessWidget {
   final DetectorModel detector;
+  final String zoneName;
   final bool alarmBorderActive;
   final VoidCallback onArm;
   final VoidCallback onDisarm;
@@ -541,6 +628,7 @@ class _DetectorDetail extends StatelessWidget {
 
   const _DetectorDetail({
     required this.detector,
+    required this.zoneName,
     required this.alarmBorderActive,
     required this.onArm,
     required this.onDisarm,
@@ -584,7 +672,8 @@ class _DetectorDetail extends StatelessWidget {
         ]),
         const SizedBox(height: 10),
         _row(c, 'Модель',  '${detector.name} LoRa'),
-        _row(c, 'Зона',    'Зона ${detector.zone}'),
+        _row(c, 'Зона',    zoneName),
+        _row(c, 'Место',   detector.place.isEmpty ? '—' : detector.place),
         _row(c, 'Событие', detector.lastEventText),
         _row(c, 'Связь',   _ago(detector.lastSeen)),
         _row(c, 'Тревог',  '${detector.alarmCount}'),
