@@ -20,7 +20,7 @@ class DatabaseService {
     String path = join(await getDatabasesPath(), 'alarm_receiver.db');
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -36,6 +36,7 @@ class DatabaseService {
         status INTEGER,
         lastSeen TEXT,
         zone INTEGER,
+        zoneName TEXT,
         place TEXT,
         isActive INTEGER,
         alarmCount INTEGER,
@@ -98,6 +99,10 @@ class DatabaseService {
     if (oldVersion < 4) {
       // Пользовательское название конкретного места извещателя (окно, калитка, дверь и т.д.)
       try { await db.execute("ALTER TABLE detectors ADD COLUMN place TEXT DEFAULT ''"); } catch (_) {}
+    }
+    if (oldVersion < 5) {
+      // Текстовое название зоны у каждого извещателя (склад, периметр, офис...)
+      try { await db.execute("ALTER TABLE detectors ADD COLUMN zoneName TEXT DEFAULT ''"); } catch (_) {}
     }
   }
 
@@ -172,6 +177,23 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  // Обновить зону и место извещателя
+  Future<void> updateDetectorZonePlace(String id, String zoneName, String place) async {
+    final db = await database;
+    await db.update(
+      'detectors',
+      {'zoneName': zoneName, 'place': place},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Удалить извещатель из базы
+  Future<void> deleteDetector(String id) async {
+    final db = await database;
+    await db.delete('detectors', where: 'id = ?', whereArgs: [id]);
   }
 
   // Обновить состояние охраны извещателя
@@ -378,5 +400,20 @@ class DatabaseService {
     final db = await database;
     await db.delete('detectors');
     await db.delete('events');
+  }
+
+  // Сброс до заводских установок: удаляются извещатели, журнал, все
+  // настройки (язык, пин-код, BT-устройство, тема) и названия зон.
+  Future<void> factoryReset() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('detectors');
+      await txn.delete('events');
+      await txn.delete('settings');
+      await txn.delete('zones');
+      for (int i = 1; i <= 8; i++) {
+        await txn.insert('zones', {'id': i, 'name': 'Зона $i', 'isArmed': 1});
+      }
+    });
   }
 }

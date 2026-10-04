@@ -8,11 +8,22 @@ class SettingsProvider extends ChangeNotifier {
   ThemeMode _themeMode  = ThemeMode.dark;
   String?   _primaryDeviceId;
   String?   _primaryDeviceName;
+  String?   _language;   // код языка интерфейса ('ru'); null — ещё не выбран
+  String?   _pinCode;    // пин-код для сброса до заводских установок
+  bool      _loaded = false;
 
   double    get fontScale        => _fontScale;
   ThemeMode get themeMode        => _themeMode;
   String?   get primaryDeviceId  => _primaryDeviceId;
   String?   get primaryDeviceName => _primaryDeviceName;
+  String?   get language         => _language;
+  bool get isLoaded       => _loaded;
+  bool get needsLanguage  => _language == null;
+  bool get needsPin       => _pinCode == null || _pinCode!.isEmpty;
+
+  // Доступные языки интерфейса. Локализация будет позже — пока только русский.
+  static const Map<String, String> availableLanguages = {'ru': 'Русский'};
+
   bool get hasPrimaryDevice =>
       _primaryDeviceId != null && _primaryDeviceId!.isNotEmpty;
 
@@ -25,7 +36,36 @@ class SettingsProvider extends ChangeNotifier {
 
     _primaryDeviceId   = await _db.getSetting('primaryDeviceId');
     _primaryDeviceName = await _db.getSetting('primaryDeviceName');
+    _language          = await _db.getSetting('language');
+    _pinCode           = await _db.getSetting('pinCode');
 
+    _loaded = true;
+    notifyListeners();
+  }
+
+  Future<void> setLanguage(String code) async {
+    _language = code;
+    await _db.saveSetting('language', code);
+    notifyListeners();
+  }
+
+  Future<void> setPinCode(String pin) async {
+    _pinCode = pin;
+    await _db.saveSetting('pinCode', pin);
+    notifyListeners();
+  }
+
+  bool checkPin(String pin) => _pinCode != null && _pinCode == pin;
+
+  // Вызывается после того, как ReceiverProvider очистил базу: возвращает
+  // значения по умолчанию, и приложение снова начинает с выбора языка.
+  void resetToDefaults() {
+    _fontScale = 1.0;
+    _themeMode = ThemeMode.dark;
+    _primaryDeviceId = null;
+    _primaryDeviceName = null;
+    _language = null;
+    _pinCode = null;
     notifyListeners();
   }
 

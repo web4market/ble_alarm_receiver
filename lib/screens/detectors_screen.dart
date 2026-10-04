@@ -167,7 +167,7 @@ class DetectorsScreen extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Зона: ${detector.zone}',
+                    'Зона: ${detector.zoneName}',
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
@@ -324,7 +324,7 @@ class DetectorsScreen extends StatelessWidget {
               _buildDetailRow('Модель', detector.name),
               _buildDetailRow(
                   'Тип байт', '0x${detector.nodeType.toRadixString(16).toUpperCase().padLeft(2, '0')}'),
-              _buildDetailRow('Зона', '${detector.zone}'),
+              _buildDetailRow('Зона', detector.zoneName),
               _buildDetailRow('Статус', detector.statusText,
                   color: detector.statusColor),
               _buildDetailRow('Последнее событие', detector.lastEventText),

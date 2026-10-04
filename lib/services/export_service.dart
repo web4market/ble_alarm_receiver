@@ -252,6 +252,14 @@ class ExportService {
         EventType.systemDisarmed => 'Сис. снят',
         EventType.zoneArmed      => 'Зона охрана',
         EventType.zoneDisarmed   => 'Зона снята',
+        EventType.detectorAdded  => 'Добавлен',
+        EventType.detectorRemoved => 'Удалён',
+        EventType.btConnected    => 'BT подключено',
+        EventType.btLost         => 'BT потеря связи',
+        EventType.btManualDisconnect => 'BT отключено',
+        EventType.btAdapterOff   => 'BT выключен',
+        EventType.btAdapterOn    => 'BT включён',
+        EventType.tabletBatteryLow => 'Разряд планшета',
       };
 
   PdfColor _pdfColor(EventType t) => switch (t) {
@@ -267,6 +275,14 @@ class ExportService {
         EventType.systemDisarmed => const PdfColor.fromInt(0xFFFF9800),
         EventType.zoneArmed      => const PdfColor.fromInt(0xFF34A853),
         EventType.zoneDisarmed   => const PdfColor.fromInt(0xFFFF9800),
+        EventType.detectorAdded  => const PdfColor.fromInt(0xFF2196F3),
+        EventType.detectorRemoved => PdfColors.grey600,
+        EventType.btConnected    => const PdfColor.fromInt(0xFF2196F3),
+        EventType.btAdapterOn    => const PdfColor.fromInt(0xFF2196F3),
+        EventType.btLost         => const PdfColor.fromInt(0xFFEA4335),
+        EventType.btAdapterOff   => const PdfColor.fromInt(0xFFEA4335),
+        EventType.btManualDisconnect => PdfColors.grey600,
+        EventType.tabletBatteryLow => const PdfColor.fromInt(0xFFFF9800),
       };
 
   pw.Widget _kv(String k, String v,

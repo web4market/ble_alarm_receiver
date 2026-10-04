@@ -389,6 +389,22 @@ class _EventsScreenState extends State<EventsScreen> {
         return 'З_ОХР';
       case EventType.zoneDisarmed:
         return 'З_СНЯ';
+      case EventType.detectorAdded:
+        return 'ДОБ';
+      case EventType.detectorRemoved:
+        return 'УДЛ';
+      case EventType.btConnected:
+        return 'BT+';
+      case EventType.btLost:
+        return 'BT!';
+      case EventType.btManualDisconnect:
+        return 'BT-';
+      case EventType.btAdapterOff:
+        return 'BT_ВЫК';
+      case EventType.btAdapterOn:
+        return 'BT_ВКЛ';
+      case EventType.tabletBatteryLow:
+        return 'ПЛ_БАТ';
     }
   }
 
@@ -418,6 +434,22 @@ class _EventsScreenState extends State<EventsScreen> {
         return 'Зона под охраной';
       case EventType.zoneDisarmed:
         return 'Зона снята';
+      case EventType.detectorAdded:
+        return 'Извещатель добавлен';
+      case EventType.detectorRemoved:
+        return 'Извещатель удалён';
+      case EventType.btConnected:
+        return 'BT подключено';
+      case EventType.btLost:
+        return 'BT потеря связи';
+      case EventType.btManualDisconnect:
+        return 'BT отключено вручную';
+      case EventType.btAdapterOff:
+        return 'Bluetooth выключен';
+      case EventType.btAdapterOn:
+        return 'Bluetooth включён';
+      case EventType.tabletBatteryLow:
+        return 'Разряд планшета';
     }
   }
 }

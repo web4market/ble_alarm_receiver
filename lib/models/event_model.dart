@@ -12,7 +12,16 @@ enum EventType {
   systemArmed,
   systemDisarmed,
   zoneArmed,
-  zoneDisarmed
+  zoneDisarmed,
+  // Новые типы добавляются ТОЛЬКО в конец: в БД хранится индекс enum.
+  detectorAdded,     // извещатель запрограммирован (код 0x54)
+  detectorRemoved,   // извещатель удалён из базы
+  btConnected,       // подключение к BT-концентратору
+  btLost,            // потеря связи с BT-концентратором
+  btManualDisconnect,// ручное отключение BT пользователем
+  btAdapterOff,      // Bluetooth выключен на планшете
+  btAdapterOn,       // Bluetooth включён на планшете
+  tabletBatteryLow,  // низкий заряд батареи планшета
 }
 
 class EventModel {
@@ -88,6 +97,22 @@ class EventModel {
         return Icons.maps_home_work;
       case EventType.zoneDisarmed:
         return Icons.maps_home_work_outlined;
+      case EventType.detectorAdded:
+        return Icons.add_circle_outline;
+      case EventType.detectorRemoved:
+        return Icons.remove_circle_outline;
+      case EventType.btConnected:
+        return Icons.bluetooth_connected;
+      case EventType.btLost:
+        return Icons.bluetooth_disabled;
+      case EventType.btManualDisconnect:
+        return Icons.bluetooth;
+      case EventType.btAdapterOff:
+        return Icons.bluetooth_disabled;
+      case EventType.btAdapterOn:
+        return Icons.bluetooth;
+      case EventType.tabletBatteryLow:
+        return Icons.battery_alert;
     }
   }
 
@@ -112,6 +137,20 @@ class EventModel {
       case EventType.disarmed:
       case EventType.systemDisarmed:
       case EventType.zoneDisarmed:
+        return Colors.orange;
+      case EventType.detectorAdded:
+        return Colors.blue;
+      case EventType.detectorRemoved:
+        return Colors.grey;
+      case EventType.btConnected:
+      case EventType.btAdapterOn:
+        return Colors.blue;
+      case EventType.btLost:
+      case EventType.btAdapterOff:
+        return Colors.red;
+      case EventType.btManualDisconnect:
+        return Colors.grey;
+      case EventType.tabletBatteryLow:
         return Colors.orange;
     }
   }

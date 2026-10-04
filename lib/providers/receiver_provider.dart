@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -22,6 +23,35 @@ class ReceiverProvider extends ChangeNotifier {
   StreamSubscription<List<int>>? _notificationSubscription;
   StreamSubscription? _pairingScanSubscription;
   Timer? _connectionMonitorTimer;
+
+  // ── Основное BT-устройство и автоподключение ────────────────────────────
+  // id сохраняется в таблице settings (ключ primaryDeviceId). Пока он есть,
+  // приложение само переподключается к устройству при любой потере связи.
+  String? _primaryDeviceId;
+  String? _primaryDeviceName;
+  bool _manualDisconnect = false; // пользователь отключился вручную
+  bool _isConnecting = false;
+  bool _btLostLogged = false;     // потеря связи уже записана в журнал
+  Timer? _reconnectTimer;
+  StreamSubscription<BluetoothConnectionState>? _deviceStateSub;
+  StreamSubscription<BluetoothAdapterState>? _adapterStateSub;
+  BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
+  final List<StreamSubscription<List<int>>> _charSubs = [];
+
+  // ── Программирование извещателей (код 0x54) ─────────────────────────────
+  bool _isProgramming = false;
+  String? _lastProgrammedId;     // id только что добавленного извещателя
+  String? _programmingMessage;   // сообщение для баннера (уже в базе и т.п.)
+
+  // Подавление дублей тревоги: извещатель шлёт 3 пакета на одну тревогу
+  static const Duration _alarmDedupWindow = Duration(seconds: 3);
+  final Map<String, DateTime> _lastAlarmPacket = {};
+
+  // ── Батарея планшета ────────────────────────────────────────────────────
+  final Battery _battery = Battery();
+  Timer? _batteryTimer;
+  int? _lastLoggedBatteryThreshold;
+  static const List<int> _batteryThresholds = [20, 10];
 
   // Alarm tracking
   final Map<String, DateTime> _alarmStartTimes = {};
@@ -76,6 +106,26 @@ class ReceiverProvider extends ChangeNotifier {
       Map.unmodifiable(_alarmBorderActive);
   bool get soundEnabled => _soundEnabled;
   Map<int, String> get zoneNames => Map.unmodifiable(_zoneNames);
+  bool get isConnecting => _isConnecting;
+  String? get primaryDeviceId => _primaryDeviceId;
+  bool get isProgramming => _isProgramming;
+  String? get lastProgrammedId => _lastProgrammedId;
+  String? get programmingMessage => _programmingMessage;
+
+  // Уже введённые пользователем зоны/места — для подсказок при вводе
+  List<String> get knownZoneNames => _distinct(_detectors.map((d) => d.zoneName));
+  List<String> get knownPlaces => _distinct(_detectors.map((d) => d.place));
+
+  static List<String> _distinct(Iterable<String> values) {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final v in values) {
+      final t = v.trim();
+      if (t.isNotEmpty && seen.add(t.toLowerCase())) result.add(t);
+    }
+    result.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return result;
+  }
 
   // Название зоны: пользовательское, если задано, иначе "Зона N" по умолчанию.
   String zoneName(int zone) => _zoneNames[zone] ?? 'Зона $zone';
@@ -122,6 +172,7 @@ class ReceiverProvider extends ChangeNotifier {
   ReceiverProvider() {
     _loadData();
     _startConnectionMonitor();
+    _startBatteryMonitor();
   }
 
   // Загрузка данных из БД
@@ -129,6 +180,8 @@ class ReceiverProvider extends ChangeNotifier {
     _detectors = await _db.getDetectors();
     _events = await _db.getEvents(limit: 200);
     _zoneNames = await _db.getZoneNames();
+    _primaryDeviceId = await _db.getSetting('primaryDeviceId');
+    _primaryDeviceName = await _db.getSetting('primaryDeviceName');
     notifyListeners();
   }
 
@@ -327,6 +380,8 @@ class ReceiverProvider extends ChangeNotifier {
     BluetoothDevice device, {
     Duration timeout = const Duration(seconds: 15),
   }) async {
+    if (_isConnecting) return;
+    _isConnecting = true;
     try {
       debugPrint('🔄 Подключение к ${device.platformName}...');
 
@@ -335,24 +390,22 @@ class ReceiverProvider extends ChangeNotifier {
 
       await device.connect(autoConnect: false, timeout: timeout);
       _connectedHub = device;
+      _manualDisconnect = false;
 
       debugPrint('✅ Подключено, ищем сервисы...');
 
       List<BluetoothService> services = await device.discoverServices();
       debugPrint('📋 Найдено сервисов: ${services.length}');
 
-      // Сбрасываем характеристики
+      // Сбрасываем характеристики и подписки от прошлого подключения
       _eventsChar = null;
       _commandChar = null;
+      await _cancelCharSubs();
 
-// Ищем нужные характеристики во всех сервисах подряд.
-      // UUID самого сервиса и характеристик у BT485_EE2D (и вообще у любого
-      // концентратора из TARGET_DEVICE_NAMES) не документирован и может
-      // отличаться от прошивки к прошивке, поэтому НЕ сравниваем
-      // serviceUuid/charUuid извещателей и событий с жёстко заданными
-      // значениями — просто просматриваем характеристики каждого найденного
-      // сервиса, независимо от его UUID, и определяем, наш ли это протокол,
-      // по содержимому самого пакета (см. ниже).
+      // Ищем нужные характеристики во всех сервисах подряд: UUID у
+      // BT485_EE2D не документирован, поэтому подписываемся на каждую
+      // notify/indicate-характеристику и определяем наш протокол по
+      // содержимому пакета (см. _validatePacket).
       for (var service in services) {
         String serviceUuid = service.uuid.toString().toUpperCase();
         debugPrint('Сервис: $serviceUuid');
@@ -363,23 +416,12 @@ class ReceiverProvider extends ChangeNotifier {
               ' (notify=${characteristic.properties.notify},'
               ' indicate=${characteristic.properties.indicate})');
 
-          // Подписываемся на КАЖДУЮ характеристику, поддерживающую
-          // notify/indicate, независимо от её UUID — заранее известного
-          // "правильного" UUID для извещателей/событий нет (он отличается
-          // от устройства к устройству), поэтому единственный надёжный
-          // способ понять, что перед нами наш протокол, — проверить сам
-          // пакет: 6 байт, канал 0x22, резервный байт 0x33 (см.
-          // _validatePacket). Если пакет валиден — обрабатываем его как
-          // событие/инициализацию извещателя, независимо от того, на какой
-          // именно характеристике он пришёл. Заодно продолжаем печатать
-          // необработанные байты в терминал — это помогает разобрать
-          // протокол устройств, для которых формат ещё не подтверждён.
           if (characteristic.properties.notify ||
               characteristic.properties.indicate) {
             try {
               await characteristic.setNotifyValue(true);
               final rawKey = '$serviceUuid/$charUuid';
-              characteristic.lastValueStream.listen((data) {
+              _charSubs.add(characteristic.lastValueStream.listen((data) {
                 _logRawPacket(rawKey, data);
                 if (_validatePacket(data)) {
                   // HUB может прислать пакет длиннее 6 байт — по протоколу
@@ -388,18 +430,13 @@ class ReceiverProvider extends ChangeNotifier {
                   _eventsChar ??= characteristic;
                   _handleEventData(pkt);
                 }
-              });
+              }));
             } catch (e) {
               debugPrint('    ⚠️ Не удалось включить notify для $charUuid: $e');
             }
           }
 
-          // Характеристику команд (запись "GET_DETECTORS" и т.п.) по
-          // содержимому не определить — она write-only и сама ничего не
-          // присылает, поэтому для неё сравнение по UUID пока оставляем.
-          // Если он не совпадёт (как сейчас на BT485_EE2D), команда на
-          // устройство просто не отправляется — на приём и разбор пакетов
-          // извещателей/событий выше это не влияет.
+          // Характеристика команд write-only — её определяем по UUID.
           if (charUuid.contains("E3A1B2C3-D4E5-F6A7-B8C9-D0E1F2A3B4C8")) {
             _commandChar = characteristic;
             debugPrint('    ✅ ХАРАКТЕРИСТИКА КОМАНД НАЙДЕНА');
@@ -407,37 +444,26 @@ class ReceiverProvider extends ChangeNotifier {
         }
       }
 
-      // Характеристика команд определяется по UUID сразу; характеристика
-      // извещателей/событий подтверждается только когда придёт первый
-      // валидный пакет (см. цикл выше) — сразу после discoverServices() он
-      // обычно ещё не получен, поэтому это нормальная промежуточная
-      // ситуация, а не ошибка подключения.
-      if (_eventsChar == null)
-        debugPrint(
-            'ℹ️ Пока не получено ни одного валидного пакета извещателей/событий');
-      if (_commandChar == null)
-        debugPrint(
-            'ℹ️ Характеристика команд не найдена (протокол ещё не подключён)');
-
       _isConnected = true;
+      _btLostLogged = false;
 
-      // При каждом новом подключении к концентратору сбрасываем ранее
-      // известный список извещателей — пока нет отдельного сервиса
-      // добавления/программирования извещателей, актуальный список будет
-      // формироваться заново на этом устройстве.
-      _detectors.clear();
-      await _db.clearDetectors();
+      // Следим за состоянием соединения: при обрыве — запись в журнал,
+      // короткий звуковой сигнал и автоматическое переподключение.
+      await _deviceStateSub?.cancel();
+      _deviceStateSub = device.connectionState.listen((state) {
+        if (state == BluetoothConnectionState.disconnected) {
+          _onHubDisconnected();
+        }
+      });
 
       _addEvent(EventModel(
         timestamp: DateTime.now(),
-        type: EventType.connected,
+        type: EventType.btConnected,
         detectorId: 'system',
         detectorName: 'Система',
-        description: 'Подключено к концентратору ${device.platformName}',
+        description: 'Подключено к BT-устройству ${_hubLabel(device)}',
       ));
 
-      // Запрашиваем список извещателей (если устройство поддерживает
-      // соответствующую характеристику команд)
       if (_commandChar != null) {
         debugPrint('📡 Запрос списка извещателей...');
         await _commandChar!.write("GET_DETECTORS".codeUnits);
@@ -449,14 +475,57 @@ class ReceiverProvider extends ChangeNotifier {
       debugPrint('❌ Ошибка подключения: $e');
       _isConnected = false;
       notifyListeners();
+    } finally {
+      _isConnecting = false;
     }
   }
 
+  String _hubLabel(BluetoothDevice device) {
+    final name = device.platformName.isNotEmpty
+        ? device.platformName
+        : (_primaryDeviceName ?? 'BT');
+    return '$name (${device.remoteId})';
+  }
+
+  Future<void> _cancelCharSubs() async {
+    for (final sub in _charSubs) {
+      await sub.cancel();
+    }
+    _charSubs.clear();
+  }
+
+  // Связь с концентратором оборвалась не по команде пользователя
+  // (выключено питание, ушли из зоны действия, выключен BT на планшете).
+  void _onHubDisconnected() {
+    final wasConnected = _isConnected;
+    _isConnected = false;
+    _eventsChar = null;
+    _commandChar = null;
+    _cancelCharSubs();
+
+    if (_manualDisconnect) {
+      notifyListeners();
+      return;
+    }
+
+    if (wasConnected && !_btLostLogged) {
+      _btLostLogged = true;
+      _addEvent(EventModel(
+        timestamp: DateTime.now(),
+        type: EventType.btLost,
+        detectorId: 'system',
+        detectorName: 'Система',
+        description: 'Потеря связи с BT-устройством'
+            '${_connectedHub != null ? ' ${_hubLabel(_connectedHub!)}' : ''}',
+      ));
+      if (_soundEnabled) _audio.playShortBeep();
+    }
+    notifyListeners();
+  }
+
   // ========== ВЫБОР ОСНОВНОГО УСТРОЙСТВА (экран настроек) ==========
-  // Отдельный, независимый от startScanning() поиск: находит все
-  // устройства из TARGET_DEVICE_NAMES и просто собирает их в список, НЕ
-  // подключаясь автоматически — пользователь сам выбирает нужное на
-  // экране настроек.
+  // Отдельный поиск: находит все устройства из TARGET_DEVICE_NAMES и
+  // собирает их в список — пользователь сам выбирает нужное.
 
   bool _isPairingScan = false;
   final List<ScanResult> _pairingResults = [];
@@ -472,17 +541,10 @@ class ReceiverProvider extends ChangeNotifier {
       final granted = await requestPermissions();
       debugPrint(
           'Разрешения на Bluetooth/геолокацию: ${granted ? "выданы" : "НЕ выданы"}');
-      if (!granted) {
-        debugPrint(
-            '❌ Без разрешений сканирование не найдёт ни одного устройства');
-      }
 
       _pairingResults.clear();
       _isPairingScan = true;
       notifyListeners();
-
-      debugPrint(
-          '▶️ Поиск устройств для выбора основного (${timeout.inSeconds} сек)...');
 
       await FlutterBluePlus.startScan(
         timeout: timeout,
@@ -492,10 +554,6 @@ class ReceiverProvider extends ChangeNotifier {
       _pairingScanSubscription = FlutterBluePlus.scanResults.listen((results) {
         for (final result in results) {
           final name = scanResultName(result);
-
-          // Логируем ВСЕ найденные устройства (не только совпадения) —
-          // это позволяет посмотреть в консоли, под каким именно именем
-          // рекламируется устройство, если оно не подхватывается автоматически.
           debugPrint('BLE (поиск основного): "$name" rssi=${result.rssi} '
               'id=${result.device.remoteId}');
 
@@ -503,8 +561,6 @@ class ReceiverProvider extends ChangeNotifier {
               !_pairingResults
                   .any((r) => r.device.remoteId == result.device.remoteId)) {
             _pairingResults.add(result);
-            debugPrint(
-                '🔎 Найдено для выбора: "$name" (${result.device.remoteId})');
             notifyListeners();
           }
         }
@@ -533,108 +589,94 @@ class ReceiverProvider extends ChangeNotifier {
     }
   }
 
-  // Подключиться к устройству, выбранному пользователем из pairingResults,
-  // и — если подключение удалось — сообщить его идентификатор и имя через
-  // onSaved (обычно это SettingsProvider.setPrimaryDevice), чтобы оно было
-  // записано как основное устройство и найдено автоматически при
-  // следующем запуске приложения.
+  // Подключиться к устройству, выбранному пользователем, и запомнить его
+  // id в базе как основное (onSaved — SettingsProvider.setPrimaryDevice,
+  // чтобы обновился экран настроек).
   Future<bool> connectAsPrimaryDevice(
     ScanResult result,
     void Function(String remoteId, String name) onSaved,
   ) async {
     await stopPairingScan();
     final name = scanResultName(result);
-    await connectToHub(result.device);
 
-    if (_isConnected) {
-      onSaved(result.device.remoteId.toString(), name);
-      debugPrint(
-          '⭐ "$name" (${result.device.remoteId}) сохранён как основное устройство');
-      return true;
+    // Если были подключены к другому устройству — отключаемся
+    if (_connectedHub != null &&
+        _connectedHub!.remoteId != result.device.remoteId) {
+      await disconnectFromHub();
     }
-    return false;
+
+    _primaryDeviceId = result.device.remoteId.toString();
+    _primaryDeviceName = name;
+    await _db.saveSetting('primaryDeviceId', _primaryDeviceId!);
+    await _db.saveSetting('primaryDeviceName', name);
+    onSaved(_primaryDeviceId!, name);
+    _manualDisconnect = false;
+
+    await connectToHub(result.device);
+    startAutoReconnect();
+    return _isConnected;
+  }
+
+  // «Забыть устройство» — автоподключение прекращается
+  Future<void> forgetPrimaryDevice() async {
+    await disconnectFromHub();
+    _primaryDeviceId = null;
+    _primaryDeviceName = null;
+    _connectedHub = null;
+    await _db.deleteSetting('primaryDeviceId');
+    await _db.deleteSetting('primaryDeviceName');
+    notifyListeners();
   }
 
   // ========== АВТОПОДКЛЮЧЕНИЕ К СОХРАНЁННОМУ УСТРОЙСТВУ ==========
-  // Вызывается один раз при старте приложения (см. main_screen.dart).
-  // Если основное устройство ранее было выбрано на экране настроек —
-  // пытаемся подключиться к нему напрямую по идентификатору, а если это
-  // не удалось (например, Bluetooth ещё не готов) — ищем его в эфире по
-  // идентификатору/имени и подключаемся, как только оно появится.
-  Future<void> autoConnectToSaved(String? remoteId, String? name) async {
-    if (remoteId == null || remoteId.isEmpty) {
-      debugPrint(
-          'ℹ️ Основное устройство не выбрано — авто-подключение пропущено');
-      return;
-    }
-    if (_isConnected) return;
+  // Запускается при старте главного экрана. Пока в базе есть id основного
+  // устройства и пользователь не отключился вручную, каждые 10 секунд
+  // пробуем подключиться к нему, если связи нет. Дополнительно следим за
+  // состоянием адаптера Bluetooth планшета.
+  static const Duration _reconnectInterval = Duration(seconds: 10);
 
-    debugPrint(
-        '🔁 Пробуем подключиться к сохранённому устройству "$name" ($remoteId)...');
-
-    try {
-      final device = BluetoothDevice.fromId(remoteId);
-      await connectToHub(device, timeout: const Duration(seconds: 8));
-      if (_isConnected) {
-        debugPrint('✅ Подключились к сохранённому устройству напрямую');
-        return;
-      }
-    } catch (e) {
-      debugPrint('Прямое подключение к сохранённому устройству не удалось: $e');
-    }
-
-    await _scanAndConnectSaved(remoteId: remoteId, name: name);
+  void startAutoReconnect() {
+    _adapterStateSub ??= FlutterBluePlus.adapterState.listen(_onAdapterState);
+    _reconnectTimer ??=
+        Timer.periodic(_reconnectInterval, (_) => _tryReconnect());
+    _tryReconnect();
   }
 
-  Future<void> _scanAndConnectSaved({
-    required String remoteId,
-    String? name,
-    Duration timeout = const Duration(seconds: 15),
-  }) async {
-    try {
-      if (_isScanning || _isConnected) return;
+  void _onAdapterState(BluetoothAdapterState state) {
+    final prev = _adapterState;
+    _adapterState = state;
+    if (prev == state || prev == BluetoothAdapterState.unknown) return;
 
-      _discoveredHubs.clear();
-      _isScanning = true;
-      notifyListeners();
-
-      debugPrint('▶️ Ищем сохранённое устройство в эфире...');
-
-      await FlutterBluePlus.startScan(
-        timeout: timeout,
-        androidUsesFineLocation: false,
-      );
-
-      _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
-        for (final result in results) {
-          final deviceName = scanResultName(result);
-          debugPrint(
-              'BLE (поиск сохранённого): "$deviceName" rssi=${result.rssi} '
-              'id=${result.device.remoteId}');
-
-          final matches = result.device.remoteId.toString() == remoteId ||
-              (name != null &&
-                  name.isNotEmpty &&
-                  deviceName.trim().toLowerCase() == name.trim().toLowerCase());
-
-          if (matches) {
-            debugPrint('✅ Сохранённое устройство найдено: "$deviceName"');
-            stopScanning();
-            connectToHub(result.device);
-            return;
-          }
-        }
-      });
-
-      FlutterBluePlus.isScanning.where((v) => v == false).first.then((_) {
-        _isScanning = false;
-        notifyListeners();
-      });
-    } catch (e) {
-      debugPrint('❌ Ошибка авто-поиска сохранённого устройства: $e');
-      _isScanning = false;
-      notifyListeners();
+    if (state == BluetoothAdapterState.off) {
+      _addEvent(EventModel(
+        timestamp: DateTime.now(),
+        type: EventType.btAdapterOff,
+        detectorId: 'system',
+        detectorName: 'Система',
+        description: 'Bluetooth выключен на планшете',
+      ));
+      if (_isConnected) _onHubDisconnected();
+    } else if (state == BluetoothAdapterState.on) {
+      _addEvent(EventModel(
+        timestamp: DateTime.now(),
+        type: EventType.btAdapterOn,
+        detectorId: 'system',
+        detectorName: 'Система',
+        description: 'Bluetooth включён на планшете',
+      ));
+      _tryReconnect();
     }
+  }
+
+  Future<void> _tryReconnect() async {
+    final id = _primaryDeviceId;
+    if (id == null || id.isEmpty) return;
+    if (_isConnected || _isConnecting || _manualDisconnect) return;
+    if (_adapterState == BluetoothAdapterState.off) return;
+
+    debugPrint('🔁 Автоподключение к сохранённому устройству $id...');
+    await connectToHub(BluetoothDevice.fromId(id),
+        timeout: const Duration(seconds: 8));
   }
 
   // ========== ПАРСИНГ ПАКЕТА ПО ПЕРВЫМ 6 БАЙТАМ ==========
@@ -708,36 +750,42 @@ class ReceiverProvider extends ChangeNotifier {
     }
   }
 
-  // Отключение от концентратора
+  // Ручное отключение от концентратора (кнопка «Отключиться»).
+  // Автоподключение приостанавливается до ручного подключения
+  // или перезапуска приложения.
   Future<void> disconnectFromHub() async {
     try {
+      _manualDisconnect = true;
       _audio.stop();
+      final wasConnected = _isConnected;
+      await _deviceStateSub?.cancel();
+      _deviceStateSub = null;
+      await _cancelCharSubs();
       await _connectedHub?.disconnect();
 
-      _addEvent(EventModel(
-        timestamp: DateTime.now(),
-        type: EventType.disconnected,
-        detectorId: 'system',
-        detectorName: 'Система',
-        description: 'Отключено от концентратора',
-      ));
-
-      _isConnected = false;
-      _connectedHub = null;
-      _eventsChar = null;
-      _commandChar = null;
-
-      // Отмечаем все извещатели как офлайн
-      for (var detector in _detectors) {
-        if (detector.status != DetectorStatus.offline) {
-          detector.status = DetectorStatus.offline;
-        }
+      if (wasConnected) {
+        _addEvent(EventModel(
+          timestamp: DateTime.now(),
+          type: EventType.btManualDisconnect,
+          detectorId: 'system',
+          detectorName: 'Система',
+          description: 'BT-устройство отключено вручную',
+        ));
       }
 
+      _isConnected = false;
+      _eventsChar = null;
+      _commandChar = null;
       notifyListeners();
     } catch (e) {
       debugPrint('Ошибка отключения: $e');
     }
+  }
+
+  // Ручное подключение (кнопка «Подключиться») — снимает паузу автоподключения
+  Future<void> reconnectNow() async {
+    _manualDisconnect = false;
+    await _tryReconnect();
   }
 
   // Запрос списка извещателей
@@ -752,63 +800,198 @@ class ReceiverProvider extends ChangeNotifier {
 
     final evtCode = data[3];
     final nodeType = data[5];
-    final evtType = _eventCodeToEventType(evtCode);
     final detId = DetectorModel.idFromPacket(data);
     final detName = DetectorModel.nameFromNodeType(nodeType);
 
-    debugPrint(
-        'Событие $detId ($detName) код 0x${evtCode.toRadixString(16).toUpperCase()} → $evtType');
+    debugPrint('Событие $detId ($detName) код 0x${evtCode.toRadixString(16).toUpperCase()}');
 
-    _addEvent(EventModel(
-      timestamp: DateTime.now(),
-      type: evtType,
-      detectorId: detId,
-      detectorName: '$detName [$detId]',
-      description: _eventDescription(evtCode, '$detName [$detId]'),
-    ));
+    // Инициализация извещателя — обрабатывается только в режиме программирования
+    if (evtCode == DetectorModel.initCode) {
+      if (_isProgramming) _programDetector(data);
+      return;
+    }
 
-    // Обновляем статус датчика в списке (или инициализируем новый, если
-    // пакет события — первый когда-либо полученный от этого извещателя:
-    // характеристика извещателей на устройстве может не использоваться, и
-    // тогда единственный способ узнать о новом извещателе — это пакет
-    // события, включая самый первый пришедший как тревога).
+    // Пакеты от извещателей, которых нет в базе, игнорируем
     final idx = _detectors.indexWhere((d) => d.id == detId);
+    if (idx < 0) {
+      debugPrint('ℹ️ Извещатель $detId не запрограммирован — пакет проигнорирован');
+      return;
+    }
+    final det = _detectors[idx];
+    final label = _detectorLabel(det);
 
-    // Фиксируем момент начала тревоги и ставим красную рамку —
-    // одинаково и для уже известных, и для новых извещателей.
     if (evtCode == 0x55) {
-      _alarmStartTimes[detId] = DateTime.now();
+      // Снят с охраны — тревогу не показываем и не пишем в журнал
+      if (!det.isArmed) {
+        debugPrint('ℹ️ Тревога от снятого с охраны $detId — проигнорирована');
+        _detectors[idx] = det.copyWith(lastSeen: DateTime.now());
+        return;
+      }
+      // Дубли: в течение 3 сек после первого пакета тревоги остальные игнорируем
+      final now = DateTime.now();
+      final last = _lastAlarmPacket[detId];
+      if (last != null && now.difference(last) < _alarmDedupWindow) {
+        debugPrint('ℹ️ Дубль тревоги $detId — проигнорирован');
+        return;
+      }
+      _lastAlarmPacket[detId] = now;
+      _alarmStartTimes[detId] = now;
       _alarmBorderActive[detId] = true;
       if (_soundEnabled) _audio.playAlarm();
     } else if (evtCode == 0xA8 || evtCode == 0x58) {
       if (_soundEnabled) _audio.playWarning();
     }
 
-    if (idx >= 0) {
-      final newStatus = DetectorModel.statusFromEventCode(evtCode);
+    _addEvent(EventModel(
+      timestamp: DateTime.now(),
+      type: _eventCodeToEventType(evtCode),
+      detectorId: detId,
+      detectorName: label,
+      description: _eventDescription(evtCode, label),
+    ));
 
-      _detectors[idx] = _detectors[idx].copyWith(
-        status: newStatus,
-        lastSeen: DateTime.now(),
-        lastEventCode: evtCode,
-        alarmCount: evtCode == 0x55
-            ? _detectors[idx].alarmCount + 1
-            : _detectors[idx].alarmCount,
-      );
-      _db.saveDetector(_detectors[idx]);
-    } else {
-      // Новый извещатель: инициализируем его прямо по пакету события и
-      // сразу добавляем в список (главный экран) и в базу данных.
-      final newDetector = DetectorModel.fromPacket(data)
-        ..alarmCount = evtCode == 0x55 ? 1 : 0;
-
-      _detectors.add(newDetector);
-      _db.saveDetector(newDetector);
-
-      debugPrint('🆕 Новый извещатель инициализирован: $detId ($detName)');
-    }
+    _detectors[idx] = det.copyWith(
+      status: DetectorModel.statusFromEventCode(evtCode),
+      lastSeen: DateTime.now(),
+      lastEventCode: evtCode,
+      alarmCount: evtCode == 0x55 ? det.alarmCount + 1 : det.alarmCount,
+    );
+    _db.saveDetector(_detectors[idx]);
 
     notifyListeners();
+  }
+
+  String _detectorLabel(DetectorModel d) {
+    final where = [d.zoneName, d.place].where((s) => s.trim().isNotEmpty).join(', ');
+    return where.isEmpty ? '${d.name} [${d.id}]' : '${d.name} [${d.id}] $where';
+  }
+
+  // ========== ПРОГРАММИРОВАНИЕ ИЗВЕЩАТЕЛЕЙ ==========
+
+  void startProgramming() {
+    _isProgramming = true;
+    _lastProgrammedId = null;
+    _programmingMessage = null;
+    notifyListeners();
+  }
+
+  void stopProgramming() {
+    _isProgramming = false;
+    _programmingMessage = null;
+    notifyListeners();
+  }
+
+  // Экран программирования забирает id нового извещателя, чтобы открыть
+  // диалог ввода зоны/места.
+  String? takeLastProgrammedId() {
+    final id = _lastProgrammedId;
+    _lastProgrammedId = null;
+    return id;
+  }
+
+  void _programDetector(List<int> pkt) {
+    final detId = DetectorModel.idFromPacket(pkt);
+    if (_detectors.any((d) => d.id == detId)) {
+      _programmingMessage = 'Извещатель $detId уже есть в базе';
+      notifyListeners();
+      return;
+    }
+
+    final det = DetectorModel.fromPacket(pkt).copyWith(
+      status: DetectorStatus.normal,
+      lastEventCode: 0xAA,
+    );
+    _detectors.add(det);
+    _db.saveDetector(det);
+
+    _isProgramming = false;
+    _programmingMessage = null;
+    _lastProgrammedId = detId;
+
+    _addEvent(EventModel(
+      timestamp: DateTime.now(),
+      type: EventType.detectorAdded,
+      detectorId: detId,
+      detectorName: '${det.name} [$detId]',
+      description: 'Запрограммирован извещатель ${det.name} [$detId]',
+    ));
+    debugPrint('🆕 Извещатель запрограммирован: $detId (${det.name})');
+    notifyListeners();
+  }
+
+  Future<void> updateDetectorZonePlace(
+      String detectorId, String zoneName, String place) async {
+    final idx = _detectors.indexWhere((d) => d.id == detectorId);
+    if (idx < 0) return;
+    _detectors[idx] = _detectors[idx]
+        .copyWith(zoneName: zoneName.trim(), place: place.trim());
+    notifyListeners();
+    await _db.updateDetectorZonePlace(detectorId, zoneName.trim(), place.trim());
+  }
+
+  Future<void> deleteDetector(String detectorId) async {
+    final idx = _detectors.indexWhere((d) => d.id == detectorId);
+    if (idx < 0) return;
+    final det = _detectors.removeAt(idx);
+    _alarmBorderActive.remove(detectorId);
+    _alarmStartTimes.remove(detectorId);
+    _lastAlarmPacket.remove(detectorId);
+    await _db.deleteDetector(detectorId);
+
+    _addEvent(EventModel(
+      timestamp: DateTime.now(),
+      type: EventType.detectorRemoved,
+      detectorId: detectorId,
+      detectorName: _detectorLabel(det),
+      description: 'Извещатель удалён: ${_detectorLabel(det)}',
+    ));
+    notifyListeners();
+  }
+
+  // ========== БАТАРЕЯ ПЛАНШЕТА ==========
+  // Раз в минуту проверяем заряд; при переходе порогов 20% и 10% (без
+  // зарядки) пишем событие в журнал и подаём короткий сигнал. После
+  // зарядки (или роста выше 25%) пороги снова «взводятся».
+
+  void _startBatteryMonitor() {
+    _batteryTimer =
+        Timer.periodic(const Duration(minutes: 1), (_) => _checkBattery());
+    _checkBattery();
+  }
+
+  Future<void> _checkBattery() async {
+    try {
+      final level = await _battery.batteryLevel;
+      final state = await _battery.batteryState;
+      final charging =
+          state == BatteryState.charging || state == BatteryState.full;
+
+      if (charging || level > _batteryThresholds.first + 5) {
+        _lastLoggedBatteryThreshold = null;
+        return;
+      }
+
+      // Самый низкий из пройденных порогов
+      int? crossed;
+      for (final t in _batteryThresholds) {
+        if (level <= t) crossed = t;
+      }
+      if (crossed == null) return;
+      if (_lastLoggedBatteryThreshold != null &&
+          crossed >= _lastLoggedBatteryThreshold!) return;
+
+      _lastLoggedBatteryThreshold = crossed;
+      _addEvent(EventModel(
+        timestamp: DateTime.now(),
+        type: EventType.tabletBatteryLow,
+        detectorId: 'system',
+        detectorName: 'Планшет',
+        description: 'Низкий заряд батареи планшета: $level%',
+      ));
+      if (_soundEnabled) _audio.playShortBeep();
+    } catch (e) {
+      debugPrint('Батарея планшета: $e');
+    }
   }
 
   // Добавить событие
@@ -1106,6 +1289,22 @@ class ReceiverProvider extends ChangeNotifier {
         return 'ОХРАНА ЗОНЫ';
       case EventType.zoneDisarmed:
         return 'СНЯТО ЗОНЫ';
+      case EventType.detectorAdded:
+        return 'ДОБАВЛЕН';
+      case EventType.detectorRemoved:
+        return 'УДАЛЁН';
+      case EventType.btConnected:
+        return 'BT ПОДКЛЮЧЕН';
+      case EventType.btLost:
+        return 'BT ПОТЕРЯ СВЯЗИ';
+      case EventType.btManualDisconnect:
+        return 'BT ОТКЛЮЧЕН';
+      case EventType.btAdapterOff:
+        return 'BT ВЫКЛ';
+      case EventType.btAdapterOn:
+        return 'BT ВКЛ';
+      case EventType.tabletBatteryLow:
+        return 'РАЗРЯД ПЛАНШЕТА';
     }
   }
 
@@ -1139,8 +1338,35 @@ class ReceiverProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Сброс до заводских установок: отключаемся от BT, очищаем базу и
+  // состояние в памяти. Пин-код проверяет вызывающий экран.
+  Future<void> factoryReset() async {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    await disconnectFromHub();
+    _audio.stop();
+    await _db.factoryReset();
+    _detectors.clear();
+    _events.clear();
+    _alarmBorderActive.clear();
+    _alarmStartTimes.clear();
+    _lastAlarmPacket.clear();
+    _primaryDeviceId = null;
+    _primaryDeviceName = null;
+    _connectedHub = null;
+    _isProgramming = false;
+    _manualDisconnect = false;
+    _zoneNames = await _db.getZoneNames();
+    notifyListeners();
+  }
+
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
+    _batteryTimer?.cancel();
+    _deviceStateSub?.cancel();
+    _adapterStateSub?.cancel();
+    _cancelCharSubs();
     _scanSubscription?.cancel();
     _connectionSubscription?.cancel();
     _notificationSubscription?.cancel();

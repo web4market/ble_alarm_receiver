@@ -11,7 +11,8 @@ class DetectorModel {
   final DetectorType type;
   DetectorStatus status;
   DateTime lastSeen;
-  int zone;
+  int zone;              // устаревший числовой номер зоны (не используется в UI)
+  String zoneName;       // название зоны/объекта: склад, периметр, офис...
   String place;   // конкретное место в зоне: окно, калитка, дверь и т.д.
   bool isActive;
   int alarmCount;
@@ -26,6 +27,7 @@ class DetectorModel {
     this.status = DetectorStatus.normal,
     DateTime? lastSeen,
     this.zone = 1,
+    this.zoneName = '',
     this.place = '',
     this.isActive = true,
     this.alarmCount = 0,
@@ -64,6 +66,9 @@ class DetectorModel {
   }
 
   /// Статус из кода события (байт 3)
+  /// Код инициализации (программирования) извещателя — байт 3
+  static const int initCode = 0x54;
+
   static DetectorStatus statusFromEventCode(int code) {
     switch (code) {
       case 0x55: return DetectorStatus.alarm;
@@ -100,6 +105,7 @@ class DetectorModel {
     DetectorStatus? status,
     DateTime? lastSeen,
     int? zone,
+    String? zoneName,
     String? place,
     bool? isActive,
     int? alarmCount,
@@ -114,6 +120,7 @@ class DetectorModel {
       status:        status        ?? this.status,
       lastSeen:      lastSeen      ?? this.lastSeen,
       zone:          zone          ?? this.zone,
+      zoneName:      zoneName      ?? this.zoneName,
       place:         place         ?? this.place,
       isActive:      isActive      ?? this.isActive,
       alarmCount:    alarmCount    ?? this.alarmCount,
@@ -131,6 +138,7 @@ class DetectorModel {
     'status':        status.index,
     'lastSeen':      lastSeen.toIso8601String(),
     'zone':          zone,
+    'zoneName':      zoneName,
     'place':         place,
     'isActive':      isActive ? 1 : 0,
     'alarmCount':    alarmCount,
@@ -147,6 +155,7 @@ class DetectorModel {
       status:        DetectorStatus.values[json['status'] ?? 0],
       lastSeen:      DateTime.parse(json['lastSeen']),
       zone:          json['zone'] ?? 1,
+      zoneName:      json['zoneName'] ?? '',
       place:         json['place'] ?? '',
       isActive:      json['isActive'] == 1,
       alarmCount:    json['alarmCount'] ?? 0,
@@ -201,6 +210,7 @@ class DetectorModel {
       case 0xAA: return 'Контроль';
       case 0xA4: return 'Чувствительность';
       case 0x58: return 'Вскрытие';
+      case 0x54: return 'Инициализация';
       default:   return '0x${lastEventCode.toRadixString(16).toUpperCase()}';
     }
   }

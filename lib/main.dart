@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'providers/receiver_provider.dart';
 import 'providers/settings_provider.dart';
 import 'screens/main_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() {
@@ -25,7 +26,15 @@ class MyApp extends StatelessWidget {
           theme:      AppTheme.light(),
           darkTheme:  AppTheme.dark(),
           themeMode:  settings.themeMode,
-          home: const MainScreen(),
+          // Первый запуск: выбор языка → ввод пин-кода → главный экран.
+          // После сброса до заводских установок снова попадаем сюда.
+          home: !settings.isLoaded
+              ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+              : settings.needsLanguage
+                  ? const LanguageSelectScreen()
+                  : settings.needsPin
+                      ? const PinSetupScreen()
+                      : const MainScreen(),
           debugShowCheckedModeBanner: false,
         ),
       ),

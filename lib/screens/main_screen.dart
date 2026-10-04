@@ -40,17 +40,13 @@ class _MainScreenState extends State<MainScreen> {
     _autoConnectSavedDevice();
   }
 
-  // При старте приложения пробуем автоматически подключиться к основному
-  // BLE-устройству, ранее выбранному пользователем на экране настроек
-  // (см. SettingsProvider.primaryDeviceId / ReceiverProvider.autoConnectToSaved).
+  // При старте запускаем автоподключение к основному BT-устройству, id
+  // которого сохранён в базе (см. ReceiverProvider.startAutoReconnect):
+  // приложение само переподключается при любой потере связи.
   Future<void> _autoConnectSavedDevice() async {
     final receiver = context.read<ReceiverProvider>();
-    final settings = context.read<SettingsProvider>();
-
     await receiver.requestPermissions();
-    await settings.load();
-    await receiver.autoConnectToSaved(
-        settings.primaryDeviceId, settings.primaryDeviceName);
+    receiver.startAutoReconnect();
   }
 
   @override
@@ -114,14 +110,19 @@ class _MainScreenState extends State<MainScreen> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.sensors_off, size: 48, color: c.text2.withOpacity(0.4)),
           const SizedBox(height: 12),
-          Text('Нет подключённых извещателей',
+          Text('Нет запрограммированных извещателей',
               style: TextStyle(color: c.text2, fontSize: 13)),
+          const SizedBox(height: 4),
+          Text('Настройки → Программирование извещателей',
+              style: TextStyle(color: c.text2, fontSize: 11)),
           const SizedBox(height: 12),
           if (!prov.isConnected)
             _OutlineBtn(
               label: 'Подключиться',
               icon: Icons.bluetooth_searching,
-              onTap: prov.startScanning,
+              onTap: prov.primaryDeviceId != null
+                  ? prov.reconnectNow
+                  : prov.startScanning,
             ),
         ]),
       );
@@ -156,9 +157,9 @@ class _MainScreenState extends State<MainScreen> {
               alarmBorderActive: prov.alarmBorderActive[d.id] ?? false,
               alarmStartTime:   prov.alarmStartTimes[d.id],
               isSelected:       _selectedId == d.id,
-              zoneName:         prov.zoneName(d.zone),
+              zoneName:         d.zoneName,
               place:            d.place,
-              onEditZone: () => _showRenameZoneDialog(context, prov, d.zone),
+              onEditZone: () => _showRenameZoneDialog(context, prov, d),
               onEditPlace: () => _showRenamePlaceDialog(context, prov, d),
               onTap: () {
                 final hasAlarm = (prov.alarmBorderActive[d.id] ?? false) ||
@@ -188,9 +189,10 @@ class _MainScreenState extends State<MainScreen> {
 
   // ── Rename zone dialog ────────────────────────────────────────────────────
 
-  void _showRenameZoneDialog(BuildContext ctx, ReceiverProvider prov, int zone) {
+  void _showRenameZoneDialog(
+      BuildContext ctx, ReceiverProvider prov, DetectorModel detector) {
     final c = appColors(ctx);
-    final controller = TextEditingController(text: prov.zoneName(zone));
+    final controller = TextEditingController(text: detector.zoneName);
     showDialog(
       context: ctx,
       builder: (dialogCtx) => AlertDialog(
@@ -205,7 +207,7 @@ class _MainScreenState extends State<MainScreen> {
             hintText: 'Например: Вход, Гараж, Спальня',
           ),
           onSubmitted: (value) {
-            prov.renameZone(zone, value);
+            prov.updateDetectorZonePlace(detector.id, value, detector.place);
             Navigator.pop(dialogCtx);
           },
         ),
@@ -216,7 +218,8 @@ class _MainScreenState extends State<MainScreen> {
           ),
           TextButton(
             onPressed: () {
-              prov.renameZone(zone, controller.text);
+              prov.updateDetectorZonePlace(
+                  detector.id, controller.text, detector.place);
               Navigator.pop(dialogCtx);
             },
             child: const Text('Сохранить'),
@@ -246,7 +249,7 @@ class _MainScreenState extends State<MainScreen> {
             hintText: 'Например: Окно, калитка, дверь',
           ),
           onSubmitted: (value) {
-            prov.renamePlace(detector.id, value);
+            prov.updateDetectorZonePlace(detector.id, detector.zoneName, value);
             Navigator.pop(dialogCtx);
           },
         ),
@@ -257,7 +260,8 @@ class _MainScreenState extends State<MainScreen> {
           ),
           TextButton(
             onPressed: () {
-              prov.renamePlace(detector.id, controller.text);
+              prov.updateDetectorZonePlace(
+                  detector.id, detector.zoneName, controller.text);
               Navigator.pop(dialogCtx);
             },
             child: const Text('Сохранить'),
@@ -311,6 +315,18 @@ class _MainScreenState extends State<MainScreen> {
                   style: TextStyle(color: c.text2)),
             ]),
           ] else ...[
+            if (prov.primaryDeviceId != null) ...[
+              _DarkBtn(
+                label: prov.isConnecting ? 'Подключение...' : 'Подключиться',
+                color: _kAccGreen,
+                icon: Icons.bluetooth,
+                onTap: () {
+                  prov.reconnectNow();
+                  Navigator.pop(ctx);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
             _DarkBtn(
               label: 'Начать поиск',
               color: _kAccBlue,
@@ -490,8 +506,8 @@ class _TopBar extends StatelessWidget {
         _iconBtn(
           provider.isConnected
               ? Icons.bluetooth_connected
-              : Icons.bluetooth_searching,
-          provider.isConnected ? _kAccBlue : c.text2,
+              : Icons.bluetooth_disabled,
+          provider.isConnected ? _kAccBlue : Colors.grey,
           onConnect,
         ),
 
@@ -580,7 +596,7 @@ class _RightPanel extends StatelessWidget {
         if (_selected != null) ...[
           _DetectorDetail(
               detector: _selected!,
-              zoneName: provider.zoneName(_selected!.zone),
+              zoneName: _selected!.zoneName.isEmpty ? '—' : _selected!.zoneName,
               alarmBorderActive:
                   provider.alarmBorderActive[_selected!.id] ?? false,
               onArm:   () => provider.armDetector(_selected!.id),
@@ -861,6 +877,14 @@ class _EventRow extends StatelessWidget {
       case EventType.systemDisarmed:return 'С-СН';
       case EventType.zoneArmed:     return 'З-ОХ';
       case EventType.zoneDisarmed:  return 'З-СН';
+      case EventType.detectorAdded: return 'ДОБ';
+      case EventType.detectorRemoved: return 'УДЛ';
+      case EventType.btConnected:   return 'BT+';
+      case EventType.btLost:        return 'BT!';
+      case EventType.btManualDisconnect: return 'BT-';
+      case EventType.btAdapterOff:  return 'BTx';
+      case EventType.btAdapterOn:   return 'BTv';
+      case EventType.tabletBatteryLow: return 'П-БАТ';
     }
   }
 }

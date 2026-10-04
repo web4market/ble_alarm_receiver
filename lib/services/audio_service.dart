@@ -7,6 +7,7 @@ class AudioService {
   AudioService._internal();
 
   AudioPlayer? _player;
+  int _playToken = 0;
 
   static const _alarm   = 'audio/sfx/alarm-siren.mp3';
   static const _warning = 'audio/sfx/seat-belt-unfastened-car-alarm.mp3';
@@ -36,6 +37,7 @@ class AudioService {
     try {
       await _ensurePlayer();
       await _player!.stop();
+      _playToken++;
       await _player!.play(AssetSource(_alarm));
       debugPrint('AudioService: alarm played');
     } catch (e) {
@@ -52,6 +54,15 @@ class AudioService {
     } catch (e) {
       debugPrint('AudioService: playWarning error: $e');
     }
+  }
+
+  // Кратковременный сигнал (потеря связи с BT, низкий заряд планшета):
+  // тот же звук предупреждения, но обрывается через [duration].
+  Future<void> playShortBeep({Duration duration = const Duration(milliseconds: 1500)}) async {
+    await playWarning();
+    final token = ++_playToken;
+    // Не обрываем звук, если за это время началась тревога/другой сигнал
+    Future.delayed(duration, () { if (token == _playToken) stop(); });
   }
 
   Future<void> stop() async {

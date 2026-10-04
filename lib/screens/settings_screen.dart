@@ -5,6 +5,8 @@ import '../providers/settings_provider.dart';
 import '../providers/receiver_provider.dart';
 import '../theme/app_theme.dart';
 import 'help_screen.dart';
+import 'onboarding_screen.dart';
+import 'programming_screen.dart';
 
 // Accent colours are stable across themes.
 const _kAccBlue  = kAccBlue;
@@ -138,10 +140,18 @@ class SettingsScreen extends StatelessWidget {
               _SectionHeader('ПОДКЛЮЧЕНИЕ'),
               _SettingsRow(
                 icon: Icons.bluetooth,
-                title: 'Bluetooth',
+                title: 'Подключение',
                 subtitle: bleSubtitle,
                 onTap: () => Navigator.push(ctx,
                     MaterialPageRoute(builder: (_) => const BluetoothSettingsPage())),
+              ),
+              _SectionHeader('ИЗВЕЩАТЕЛИ'),
+              _SettingsRow(
+                icon: Icons.sensors,
+                title: 'Программирование извещателей',
+                subtitle: 'Запрограммировано: ${receiver.detectors.length}',
+                onTap: () => Navigator.push(ctx,
+                    MaterialPageRoute(builder: (_) => const ProgrammingScreen())),
               ),
               _SectionHeader('УВЕДОМЛЕНИЯ'),
               _SettingsRow(
@@ -159,11 +169,85 @@ class SettingsScreen extends StatelessWidget {
                 onTap: () => Navigator.push(ctx,
                     MaterialPageRoute(builder: (_) => const HelpScreen())),
               ),
+              _SectionHeader('СИСТЕМА'),
+              _SettingsRow(
+                icon: Icons.restart_alt,
+                title: 'Сбросить данные до заводских установок',
+                subtitle: 'Удаляет извещатели, журнал, BT-устройство и настройки',
+                onTap: () => _factoryReset(ctx),
+              ),
             ],
           );
         },
       ),
     );
+  }
+
+  // Сброс до заводских установок — только после ввода пин-кода, заданного
+  // при первом запуске. После сброса приложение начинает с выбора языка.
+  Future<void> _factoryReset(BuildContext context) async {
+    final c = appColors(context);
+    final settings = context.read<SettingsProvider>();
+    final receiver = context.read<ReceiverProvider>();
+    final pinCtrl = TextEditingController();
+    String? error;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (dCtx, setState) {
+          void submit() {
+            if (settings.checkPin(pinCtrl.text)) {
+              Navigator.pop(dCtx, true);
+            } else {
+              setState(() => error = 'Неверный пин-код');
+            }
+          }
+
+          return AlertDialog(
+            backgroundColor: c.surface,
+            title: const Text('Сброс до заводских установок'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                    'Будут удалены все извещатели, журнал событий, выбранное '
+                    'BT-устройство и настройки. Введите пин-код для подтверждения.',
+                    style: TextStyle(fontSize: 12, color: c.text2)),
+                const SizedBox(height: 16),
+                PinField(
+                    controller: pinCtrl,
+                    label: 'Пин-код',
+                    autofocus: true,
+                    onSubmitted: (_) => submit()),
+                if (error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(error!,
+                      style: const TextStyle(fontSize: 12, color: _kAccRed)),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(dCtx, false),
+                  child: const Text('Отмена')),
+              TextButton(
+                  onPressed: submit,
+                  child: const Text('Сбросить',
+                      style: TextStyle(color: _kAccRed))),
+            ],
+          );
+        },
+      ),
+    );
+    pinCtrl.dispose();
+    if (ok != true || !context.mounted) return;
+
+    await receiver.factoryReset();
+    settings.resetToDefaults();
+    if (context.mounted) {
+      Navigator.of(context).popUntil((r) => r.isFirst);
+    }
   }
 
   static String _themeLabel(ThemeMode m) => switch (m) {
@@ -386,7 +470,7 @@ class BluetoothSettingsPage extends StatelessWidget {
     final c = appColors(context);
     return Scaffold(
       backgroundColor: c.page,
-      appBar: _settingsAppBar(context, 'BLUETOOTH'),
+      appBar: _settingsAppBar(context, 'ПОДКЛЮЧЕНИЕ'),
       body: Consumer2<SettingsProvider, ReceiverProvider>(
         builder: (ctx, settings, receiver, _) {
           return ListView(
@@ -522,7 +606,10 @@ class BluetoothSettingsPage extends StatelessWidget {
                               label: 'Забыть устройство',
                               icon: Icons.delete_outline,
                               color: c.text2,
-                              onTap: settings.clearPrimaryDevice,
+                              onTap: () {
+                                receiver.forgetPrimaryDevice();
+                                settings.clearPrimaryDevice();
+                              },
                             ),
                           ),
                         ],

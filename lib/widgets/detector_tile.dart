@@ -172,7 +172,7 @@ class _DetectorTileState extends State<DetectorTile>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _editableLabel(
-                    text: widget.zoneName ?? 'Зона ${widget.detector.zone}',
+                    text: (widget.zoneName ?? '').isEmpty ? 'Зона не задана' : widget.zoneName!,
                     color: c.tileText,
                     fontSize: 9,
                     fontWeight: FontWeight.w600,
