@@ -5,6 +5,7 @@ const kAccBlue  = Color(0xFF4FC3F7);
 const kAccGreen = Color(0xFF34A853);
 const kAccRed   = Color(0xFFEA4335);
 const kAccAmber = Color(0xFFFBBC04);
+const kAccGold  = Color(0xFFD4AF37); // логотип ZHURIN ELECTRONICS
 
 // ── Custom colour tokens ──────────────────────────────────────────────────────
 

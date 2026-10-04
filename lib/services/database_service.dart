@@ -20,7 +20,7 @@ class DatabaseService {
     String path = join(await getDatabasesPath(), 'alarm_receiver.db');
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -37,6 +37,7 @@ class DatabaseService {
         lastSeen TEXT,
         zone INTEGER,
         zoneName TEXT,
+        slot INTEGER,
         place TEXT,
         isActive INTEGER,
         alarmCount INTEGER,
@@ -104,6 +105,16 @@ class DatabaseService {
       // Текстовое название зоны у каждого извещателя (склад, периметр, офис...)
       try { await db.execute("ALTER TABLE detectors ADD COLUMN zoneName TEXT DEFAULT ''"); } catch (_) {}
     }
+    if (oldVersion < 6) {
+      // Постоянный номер извещателя (номер квадрата). Существующим
+      // извещателям номера раздаются по порядку.
+      try { await db.execute('ALTER TABLE detectors ADD COLUMN slot INTEGER DEFAULT 0'); } catch (_) {}
+      final rows = await db.query('detectors', columns: ['id'], orderBy: 'rowid');
+      for (int i = 0; i < rows.length; i++) {
+        await db.update('detectors', {'slot': i + 1},
+            where: 'id = ?', whereArgs: [rows[i]['id']]);
+      }
+    }
   }
 
   // Сохранить извещатель
@@ -133,7 +144,8 @@ class DatabaseService {
   // Получить все извещатели
   Future<List<DetectorModel>> getDetectors() async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query('detectors');
+    final List<Map<String, dynamic>> maps =
+        await db.query('detectors', orderBy: 'slot');
 
     return List.generate(maps.length, (i) {
       return DetectorModel.fromJson(maps[i]);

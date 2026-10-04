@@ -161,6 +161,7 @@ class SettingsScreen extends StatelessWidget {
                 onTap: () => Navigator.push(ctx,
                     MaterialPageRoute(builder: (_) => const SoundSettingsPage())),
               ),
+              _ServerApiBlock(settings: settings),
               _SectionHeader('ИНФОРМАЦИЯ'),
               _SettingsRow(
                 icon: Icons.help_outline,
@@ -326,9 +327,9 @@ class ScreenSettingsPage extends StatelessWidget {
                       ),
                       child: Slider(
                         value: scale,
-                        min: 0.6,
-                        max: 2.0,
-                        divisions: 14,
+                        min: SettingsProvider.minFontScale,
+                        max: SettingsProvider.maxFontScale,
+                        divisions: 10,
                         onChanged: settings.setFontScale,
                       ),
                     ),
@@ -339,11 +340,11 @@ class ScreenSettingsPage extends StatelessWidget {
                       children: [
                         _stepBtn(ctx, '−', () => settings.setFontScale(scale - 0.1)),
                         Row(children: [
-                          _presetBtn(ctx, '60%',  0.6, scale, settings),
-                          const SizedBox(width: 6),
                           _presetBtn(ctx, '100%', 1.0, scale, settings),
                           const SizedBox(width: 6),
-                          _presetBtn(ctx, '150%', 1.5, scale, settings),
+                          _presetBtn(ctx, '130%', 1.3, scale, settings),
+                          const SizedBox(width: 6),
+                          _presetBtn(ctx, '160%', 1.6, scale, settings),
                           const SizedBox(width: 6),
                           _presetBtn(ctx, '200%', 2.0, scale, settings),
                         ]),
@@ -975,6 +976,174 @@ class _ThemePicker extends StatelessWidget {
           ),
         );
       }).toList(),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Уведомления → Связь с сервером по API
+// Галочка включает блок; когда она снята, поля адреса, логина и пароля
+// серые и недоступны для редактирования. Значения сохраняются в БД по мере ввода.
+// ════════════════════════════════════════════════════════════════════════════
+
+class _ServerApiBlock extends StatefulWidget {
+  final SettingsProvider settings;
+  const _ServerApiBlock({required this.settings});
+
+  @override
+  State<_ServerApiBlock> createState() => _ServerApiBlockState();
+}
+
+class _ServerApiBlockState extends State<_ServerApiBlock> {
+  late final TextEditingController _url;
+  late final TextEditingController _login;
+  late final TextEditingController _password;
+  bool _showPassword = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _url = TextEditingController(text: widget.settings.apiUrl);
+    _login = TextEditingController(text: widget.settings.apiLogin);
+    _password = TextEditingController(text: widget.settings.apiPassword);
+  }
+
+  @override
+  void dispose() {
+    _url.dispose();
+    _login.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    final s = widget.settings;
+    final enabled = s.apiEnabled;
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: c.border, width: 0.5)),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () => s.setApiEnabled(!enabled),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: _kAccBlue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.cloud_outlined,
+                        size: 18, color: _kAccBlue),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Связь с сервером по API',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: c.text1)),
+                        const SizedBox(height: 2),
+                        Text(enabled ? 'Включена' : 'Выключена',
+                            style: TextStyle(fontSize: 11, color: c.text2)),
+                      ],
+                    ),
+                  ),
+                  Checkbox(
+                    value: enabled,
+                    activeColor: _kAccBlue,
+                    onChanged: (v) => s.setApiEnabled(v ?? false),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Opacity(
+            opacity: enabled ? 1 : 0.4,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(66, 0, 16, 14),
+              child: Column(
+                children: [
+                  _field(
+                    controller: _url,
+                    label: 'Адрес сервера API',
+                    hint: 'https://example.com/api',
+                    enabled: enabled,
+                    keyboard: TextInputType.url,
+                    onChanged: s.setApiUrl,
+                  ),
+                  const SizedBox(height: 10),
+                  _field(
+                    controller: _login,
+                    label: 'Логин',
+                    enabled: enabled,
+                    onChanged: s.setApiLogin,
+                  ),
+                  const SizedBox(height: 10),
+                  _field(
+                    controller: _password,
+                    label: 'Пароль',
+                    enabled: enabled,
+                    obscure: !_showPassword,
+                    onChanged: s.setApiPassword,
+                    suffix: IconButton(
+                      icon: Icon(
+                          _showPassword
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          size: 18),
+                      onPressed: enabled
+                          ? () => setState(() => _showPassword = !_showPassword)
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required bool enabled,
+    required ValueChanged<String> onChanged,
+    String? hint,
+    bool obscure = false,
+    TextInputType? keyboard,
+    Widget? suffix,
+  }) {
+    final c = appColors(context);
+    return TextField(
+      controller: controller,
+      enabled: enabled,
+      obscureText: obscure,
+      keyboardType: keyboard,
+      autocorrect: false,
+      enableSuggestions: !obscure,
+      onChanged: onChanged,
+      style: TextStyle(fontSize: 13, color: c.text1),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        isDense: true,
+        border: const OutlineInputBorder(),
+        suffixIcon: suffix,
+      ),
     );
   }
 }

@@ -153,14 +153,12 @@ class _MainScreenState extends State<MainScreen> {
             final d = prov.detectors[i];
             return DetectorTile(
               detector:         d,
-              number:           i + 1,
+              number:           d.slot > 0 ? d.slot : i + 1,
               alarmBorderActive: prov.alarmBorderActive[d.id] ?? false,
               alarmStartTime:   prov.alarmStartTimes[d.id],
               isSelected:       _selectedId == d.id,
               zoneName:         d.zoneName,
               place:            d.place,
-              onEditZone: () => _showRenameZoneDialog(context, prov, d),
-              onEditPlace: () => _showRenamePlaceDialog(context, prov, d),
               onTap: () {
                 final hasAlarm = (prov.alarmBorderActive[d.id] ?? false) ||
                     d.status == DetectorStatus.alarm ||
@@ -185,90 +183,6 @@ class _MainScreenState extends State<MainScreen> {
     if (n <= 6)  return 3;
     if (n <= 12) return 4;
     return 5;
-  }
-
-  // ── Rename zone dialog ────────────────────────────────────────────────────
-
-  void _showRenameZoneDialog(
-      BuildContext ctx, ReceiverProvider prov, DetectorModel detector) {
-    final c = appColors(ctx);
-    final controller = TextEditingController(text: detector.zoneName);
-    showDialog(
-      context: ctx,
-      builder: (dialogCtx) => AlertDialog(
-        backgroundColor: c.surface,
-        title: const Text('Название зоны'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 40,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            hintText: 'Например: Вход, Гараж, Спальня',
-          ),
-          onSubmitted: (value) {
-            prov.updateDetectorZonePlace(detector.id, value, detector.place);
-            Navigator.pop(dialogCtx);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Отмена'),
-          ),
-          TextButton(
-            onPressed: () {
-              prov.updateDetectorZonePlace(
-                  detector.id, controller.text, detector.place);
-              Navigator.pop(dialogCtx);
-            },
-            child: const Text('Сохранить'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Rename place dialog ───────────────────────────────────────────────────
-
-  void _showRenamePlaceDialog(
-      BuildContext ctx, ReceiverProvider prov, DetectorModel detector) {
-    final c = appColors(ctx);
-    final controller = TextEditingController(text: detector.place);
-    showDialog(
-      context: ctx,
-      builder: (dialogCtx) => AlertDialog(
-        backgroundColor: c.surface,
-        title: const Text('Место установки'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 40,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            hintText: 'Например: Окно, калитка, дверь',
-          ),
-          onSubmitted: (value) {
-            prov.updateDetectorZonePlace(detector.id, detector.zoneName, value);
-            Navigator.pop(dialogCtx);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Отмена'),
-          ),
-          TextButton(
-            onPressed: () {
-              prov.updateDetectorZonePlace(
-                  detector.id, detector.zoneName, controller.text);
-              Navigator.pop(dialogCtx);
-            },
-            child: const Text('Сохранить'),
-          ),
-        ],
-      ),
-    );
   }
 
   // ── Connection dialog ─────────────────────────────────────────────────────
@@ -436,10 +350,10 @@ class _TopBar extends StatelessWidget {
             const Text('ZHURIN',
                 style: TextStyle(
                     fontSize: 15, fontWeight: FontWeight.w900,
-                    color: _kAccBlue, letterSpacing: 2.5, height: 1)),
+                    color: kAccGold, letterSpacing: 2.5, height: 1)),
             Text('ELECTRONICS',
                 style: TextStyle(
-                    fontSize: 7, color: c.text2,
+                    fontSize: 7, color: kAccGold,
                     letterSpacing: 1.8, height: 1)),
           ],
         ),
@@ -844,7 +758,7 @@ class _EventRow extends StatelessWidget {
                 style: TextStyle(fontSize: 10, color: c.text1),
                 overflow: TextOverflow.ellipsis),
             Text(
-              DateFormat('dd.MM  HH:mm:ss').format(event.timestamp),
+              DateFormat('dd.MM.yyyy  HH:mm:ss').format(event.timestamp),
               style: TextStyle(fontSize: 8, color: c.text2),
             ),
           ],

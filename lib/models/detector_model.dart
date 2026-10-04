@@ -12,6 +12,7 @@ class DetectorModel {
   DetectorStatus status;
   DateTime lastSeen;
   int zone;              // устаревший числовой номер зоны (не используется в UI)
+  int slot;              // номер извещателя (номер квадрата), закреплён за ним; 0 — не назначен
   String zoneName;       // название зоны/объекта: склад, периметр, офис...
   String place;   // конкретное место в зоне: окно, калитка, дверь и т.д.
   bool isActive;
@@ -28,6 +29,7 @@ class DetectorModel {
     DateTime? lastSeen,
     this.zone = 1,
     this.zoneName = '',
+    this.slot = 0,
     this.place = '',
     this.isActive = true,
     this.alarmCount = 0,
@@ -106,6 +108,7 @@ class DetectorModel {
     DateTime? lastSeen,
     int? zone,
     String? zoneName,
+    int? slot,
     String? place,
     bool? isActive,
     int? alarmCount,
@@ -121,6 +124,7 @@ class DetectorModel {
       lastSeen:      lastSeen      ?? this.lastSeen,
       zone:          zone          ?? this.zone,
       zoneName:      zoneName      ?? this.zoneName,
+      slot:          slot          ?? this.slot,
       place:         place         ?? this.place,
       isActive:      isActive      ?? this.isActive,
       alarmCount:    alarmCount    ?? this.alarmCount,
@@ -139,6 +143,7 @@ class DetectorModel {
     'lastSeen':      lastSeen.toIso8601String(),
     'zone':          zone,
     'zoneName':      zoneName,
+    'slot':          slot,
     'place':         place,
     'isActive':      isActive ? 1 : 0,
     'alarmCount':    alarmCount,
@@ -156,6 +161,7 @@ class DetectorModel {
       lastSeen:      DateTime.parse(json['lastSeen']),
       zone:          json['zone'] ?? 1,
       zoneName:      json['zoneName'] ?? '',
+      slot:          json['slot'] ?? 0,
       place:         json['place'] ?? '',
       isActive:      json['isActive'] == 1,
       alarmCount:    json['alarmCount'] ?? 0,

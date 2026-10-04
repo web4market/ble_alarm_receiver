@@ -21,8 +21,13 @@ class ProgrammingScreen extends StatefulWidget {
   State<ProgrammingScreen> createState() => _ProgrammingScreenState();
 }
 
+const double _kTile = 160;
+const double _kGap = 10;
+const double _kPad = 12;
+
 class _ProgrammingScreenState extends State<ProgrammingScreen> {
   late final ReceiverProvider _prov;
+  int _extraRows = 0; // ряды, добавленные кнопкой «+»
 
   @override
   void initState() {
@@ -68,38 +73,62 @@ class _ProgrammingScreenState extends State<ProgrammingScreen> {
       ),
       body: Consumer<ReceiverProvider>(
         builder: (ctx, prov, _) {
-          final detectors = prov.detectors;
           return Column(
             children: [
               if (prov.isProgramming) _ProgrammingBanner(prov: prov),
               Expanded(
-                child: GridView.builder(
-                  padding: const EdgeInsets.all(12),
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 180,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 1,
-                  ),
-                  itemCount: detectors.length + 1,
-                  itemBuilder: (_, i) {
-                    if (i == detectors.length) {
-                      return _AddTile(
-                        empty: detectors.isEmpty,
-                        active: prov.isProgramming,
-                        onTap: prov.isProgramming
+                child: LayoutBuilder(builder: (_, box) {
+                  // Квадраты фиксированного размера заполняют весь экран;
+                  // «+» добавляет ещё ряд. Номер квадрата закреплён за
+                  // извещателем, удаление освобождает номер без сдвига.
+                  final cols = ((box.maxWidth - _kPad * 2 + _kGap) /
+                          (_kTile + _kGap))
+                      .floor()
+                      .clamp(1, 100);
+                  final rows = ((box.maxHeight - _kPad * 2 + _kGap) /
+                          (_kTile + _kGap))
+                      .floor()
+                      .clamp(1, 100);
+                  var count = cols * rows + _extraRows * cols;
+                  if (count < prov.maxSlot) count = prov.maxSlot;
+                  count = (count / cols).ceil() * cols;
+
+                  return GridView.builder(
+                    padding: const EdgeInsets.all(_kPad),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: cols,
+                      mainAxisSpacing: _kGap,
+                      crossAxisSpacing: _kGap,
+                      childAspectRatio: 1,
+                    ),
+                    itemCount: count + 1,
+                    itemBuilder: (_, i) {
+                      if (i == count) {
+                        return _PlusButton(
+                            onTap: () => setState(() => _extraRows++));
+                      }
+                      final slot = i + 1;
+                      final d = prov.detectorBySlot(slot);
+                      if (d != null) {
+                        return _DetectorSquare(
+                          detector: d,
+                          number: slot,
+                          onTap: () => _showEditDialog(d),
+                        );
+                      }
+                      final waiting =
+                          prov.isProgramming && prov.programmingSlot == slot;
+                      return _EmptySlot(
+                        number: slot,
+                        waiting: waiting,
+                        noDetectors: prov.detectors.isEmpty,
+                        onTap: waiting
                             ? prov.stopProgramming
-                            : prov.startProgramming,
+                            : () => prov.startProgramming(slot),
                       );
-                    }
-                    final d = detectors[i];
-                    return _DetectorSquare(
-                      detector: d,
-                      number: i + 1,
-                      onTap: () => _showEditDialog(d),
-                    );
-                  },
-                ),
+                    },
+                  );
+                }),
               ),
             ],
           );
@@ -120,8 +149,8 @@ class _ProgrammingScreenState extends State<ProgrammingScreen> {
       builder: (dCtx) => AlertDialog(
         backgroundColor: c.surface,
         title: Text(isNew
-            ? 'Новый извещатель ${d.name} [${d.id}]'
-            : '${d.name} [${d.id}]'),
+            ? '№${d.slot}: новый извещатель ${d.name} [${d.id}]'
+            : '№${d.slot}: ${d.name} [${d.id}]'),
         content: SizedBox(
           width: 360,
           child: Column(
@@ -178,7 +207,7 @@ class _ProgrammingScreenState extends State<ProgrammingScreen> {
         backgroundColor: c.surface,
         title: const Text('Удалить извещатель?'),
         content: Text(
-            '${d.name} [${d.id}] будет удалён из базы. Приложение перестанет '
+            '№${d.slot} ${d.name} [${d.id}] будет удалён из базы, номер №${d.slot} освободится. Приложение перестанет '
             'реагировать на его сигналы, пока он не будет запрограммирован заново.'),
         actions: [
           TextButton(
@@ -220,7 +249,7 @@ class _ProgrammingBanner extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Вставьте элемент питания в извещатель',
+              Text('№${prov.programmingSlot ?? ''}: вставьте элемент питания в извещатель',
                   style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
@@ -249,38 +278,77 @@ class _ProgrammingBanner extends StatelessWidget {
   }
 }
 
-// ── Блок «+» ────────────────────────────────────────────────────────────────
+// ── Свободный квадрат ───────────────────────────────────────────────────────
 
-class _AddTile extends StatelessWidget {
-  final bool empty;   // в базе нет извещателей — блок красный
-  final bool active;  // идёт программирование
+class _EmptySlot extends StatelessWidget {
+  final int number;
+  final bool waiting;      // в этот квадрат идёт программирование
+  final bool noDetectors;  // в базе нет извещателей — подсвечиваем красным
   final VoidCallback onTap;
 
-  const _AddTile({required this.empty, required this.active, required this.onTap});
+  const _EmptySlot({
+    required this.number,
+    required this.waiting,
+    required this.noDetectors,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = appColors(context);
-    final color = active ? kAccAmber : (empty ? kAccRed : kAccBlue);
+    final color = waiting ? kAccAmber : (noDetectors ? kAccRed : c.text2);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),
       child: Container(
         decoration: BoxDecoration(
-          color: empty && !active ? kAccRed.withOpacity(0.25) : c.surface,
-          border: Border.all(color: color, width: 1.5),
+          color: waiting
+              ? kAccAmber.withOpacity(0.12)
+              : (noDetectors ? kAccRed.withOpacity(0.12) : c.surface.withOpacity(0.5)),
+          border: Border.all(
+              color: waiting ? kAccAmber : color.withOpacity(0.5),
+              width: waiting ? 1.5 : 1),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(active ? Icons.hourglass_top : Icons.add, size: 48, color: color),
-            const SizedBox(height: 6),
-            Text(active ? 'Ожидание...' : 'Добавить',
+        child: Stack(children: [
+          Positioned(
+            left: 8,
+            top: 6,
+            child: Text('$number',
                 style: TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600, color: color)),
-          ],
-        ),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: color.withOpacity(0.8))),
+          ),
+          Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(waiting ? Icons.hourglass_top : Icons.add,
+                  size: 32, color: color.withOpacity(0.8)),
+              const SizedBox(height: 4),
+              Text(waiting ? 'Ожидание...' : 'Свободно',
+                  style: TextStyle(fontSize: 11, color: color.withOpacity(0.8))),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ── «+» без квадрата: добавить ещё ряд квадратов ────────────────────────────
+
+class _PlusButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _PlusButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: IconButton(
+        iconSize: 48,
+        tooltip: 'Добавить квадраты',
+        icon: const Icon(Icons.add, color: kAccBlue),
+        onPressed: onTap,
       ),
     );
   }

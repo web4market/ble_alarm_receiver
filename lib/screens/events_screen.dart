@@ -118,7 +118,7 @@ class _EventsScreenState extends State<EventsScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Фильтр: ${_startDate != null ? DateFormat('dd.MM.yy').format(_startDate!) : '...'} - ${_endDate != null ? DateFormat('dd.MM.yy').format(_endDate!) : '...'}',
+                      'Фильтр: ${_startDate != null ? DateFormat('dd.MM.yyyy').format(_startDate!) : '...'} - ${_endDate != null ? DateFormat('dd.MM.yyyy').format(_endDate!) : '...'}',
                       style: const TextStyle(fontSize: 12),
                     ),
                   ),
@@ -187,7 +187,7 @@ class _EventsScreenState extends State<EventsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${DateFormat('dd.MM.yy HH:mm:ss').format(event.timestamp)} | ${event.detectorName}',
+              '${DateFormat('dd.MM.yyyy HH:mm:ss').format(event.timestamp)} | ${event.detectorName}',
               style: const TextStyle(fontSize: 12),
             ),
           ],
@@ -345,7 +345,7 @@ class _EventsScreenState extends State<EventsScreen> {
             const SizedBox(height: 8),
             Text('Извещатель: ${event.detectorName}'),
             Text('ID: ${event.detectorId}'),
-            Text('Время: ${DateFormat('dd.MM.yy HH:mm:ss').format(event.timestamp)}'),
+            Text('Время: ${DateFormat('dd.MM.yyyy HH:mm:ss').format(event.timestamp)}'),
             if (event.data != null) ...[
               const Divider(),
               const Text('Дополнительные данные:'),

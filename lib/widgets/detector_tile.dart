@@ -16,8 +16,6 @@ class DetectorTile extends StatefulWidget {
   final String? place;
   final VoidCallback? onTap;
   final VoidCallback? onResetAlarm;
-  final VoidCallback? onEditZone;
-  final VoidCallback? onEditPlace;
 
   const DetectorTile({
     super.key,
@@ -30,8 +28,6 @@ class DetectorTile extends StatefulWidget {
     this.place,
     this.onTap,
     this.onResetAlarm,
-    this.onEditZone,
-    this.onEditPlace,
   });
 
   @override
@@ -164,7 +160,7 @@ class _DetectorTileState extends State<DetectorTile>
             borderRadius: BorderRadius.circular(4),
           ),
           child: Stack(children: [
-            // Zone + place labels — top left (tap either to rename)
+            // Zone + place labels — top left (редактирование только в настройках программирования)
             Positioned(
               top: 5, left: 8, right: 28,
               child: Column(
@@ -174,20 +170,18 @@ class _DetectorTileState extends State<DetectorTile>
                   _editableLabel(
                     text: (widget.zoneName ?? '').isEmpty ? 'Зона не задана' : widget.zoneName!,
                     color: c.tileText,
-                    fontSize: 9,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    onTap: widget.onEditZone,
                   ),
                   _editableLabel(
                     text: (widget.place == null || widget.place!.isEmpty)
                         ? 'Место'
                         : widget.place!,
                     color: c.tileTextDim,
-                    fontSize: 7.5,
+                    fontSize: 10.5,
                     fontStyle: (widget.place == null || widget.place!.isEmpty)
                         ? FontStyle.italic
                         : FontStyle.normal,
-                    onTap: widget.onEditPlace,
                   ),
                 ],
               ),

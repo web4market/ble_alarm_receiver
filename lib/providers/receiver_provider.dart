@@ -43,9 +43,15 @@ class ReceiverProvider extends ChangeNotifier {
   String? _lastProgrammedId;     // id только что добавленного извещателя
   String? _programmingMessage;   // сообщение для баннера (уже в базе и т.п.)
 
-  // Подавление дублей тревоги: извещатель шлёт 3 пакета на одну тревогу
-  static const Duration _alarmDedupWindow = Duration(seconds: 3);
+  // Подавление дублей тревоги: 10 с после тревоги пакеты тревоги с ТОГО ЖЕ извещателя игнорируются (с других — нет)
+  static const Duration _alarmDedupWindow = Duration(seconds: 10);
   final Map<String, DateTime> _lastAlarmPacket = {};
+
+  // После инициализации (0x54) извещатель сразу шлёт пакет тревоги —
+  // в течение минуты после программирования тревоги от него игнорируем
+  static const Duration _postInitAlarmIgnore = Duration(minutes: 1);
+  final Map<String, DateTime> _programmedAt = {};
+  int? _programmingSlot;         // номер квадрата, в который программируем
 
   // ── Батарея планшета ────────────────────────────────────────────────────
   final Battery _battery = Battery();
@@ -109,6 +115,26 @@ class ReceiverProvider extends ChangeNotifier {
   bool get isConnecting => _isConnecting;
   String? get primaryDeviceId => _primaryDeviceId;
   bool get isProgramming => _isProgramming;
+  int? get programmingSlot => _programmingSlot;
+
+  // Извещатель, закреплённый за номером квадрата
+  DetectorModel? detectorBySlot(int slot) {
+    for (final d in _detectors) {
+      if (d.slot == slot) return d;
+    }
+    return null;
+  }
+
+  int get maxSlot =>
+      _detectors.fold(0, (m, d) => d.slot > m ? d.slot : m);
+
+  int _firstFreeSlot() {
+    var n = 1;
+    while (detectorBySlot(n) != null) {
+      n++;
+    }
+    return n;
+  }
   String? get lastProgrammedId => _lastProgrammedId;
   String? get programmingMessage => _programmingMessage;
 
@@ -209,8 +235,8 @@ class ReceiverProvider extends ChangeNotifier {
           timestamp: now,
           type: EventType.disconnected,
           detectorId: detector.id,
-          detectorName: detector.name,
-          description: 'Потеря связи с ${detector.name}',
+          detectorName: _detectorLabel(detector),
+          description: 'Потеря связи с ${_detectorLabel(detector)}',
         ));
       }
     }
@@ -827,7 +853,14 @@ class ReceiverProvider extends ChangeNotifier {
         _detectors[idx] = det.copyWith(lastSeen: DateTime.now());
         return;
       }
-      // Дубли: в течение 3 сек после первого пакета тревоги остальные игнорируем
+      // Пакет тревоги сразу после инициализации (вставили батарею)
+      final programmed = _programmedAt[detId];
+      if (programmed != null &&
+          DateTime.now().difference(programmed) < _postInitAlarmIgnore) {
+        debugPrint('ℹ️ Тревога $detId после программирования — проигнорирована');
+        return;
+      }
+      // Дубли: 10 сек после тревоги игнорируем пакеты тревоги этого извещателя
       final now = DateTime.now();
       final last = _lastAlarmPacket[detId];
       if (last != null && now.difference(last) < _alarmDedupWindow) {
@@ -861,14 +894,19 @@ class ReceiverProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Подпись извещателя для журнала: «№3 L70RA [0003] Склад, дверь»
   String _detectorLabel(DetectorModel d) {
     final where = [d.zoneName, d.place].where((s) => s.trim().isNotEmpty).join(', ');
-    return where.isEmpty ? '${d.name} [${d.id}]' : '${d.name} [${d.id}] $where';
+    final head = '${d.slot > 0 ? '№${d.slot} ' : ''}${d.name} [${d.id}]';
+    return where.isEmpty ? head : '$head $where';
   }
 
   // ========== ПРОГРАММИРОВАНИЕ ИЗВЕЩАТЕЛЕЙ ==========
 
-  void startProgramming() {
+  // [slot] — номер свободного квадрата; без него — первый свободный номер
+  void startProgramming([int? slot]) {
+    _programmingSlot =
+        (slot != null && detectorBySlot(slot) == null) ? slot : _firstFreeSlot();
     _isProgramming = true;
     _lastProgrammedId = null;
     _programmingMessage = null;
@@ -877,6 +915,7 @@ class ReceiverProvider extends ChangeNotifier {
 
   void stopProgramming() {
     _isProgramming = false;
+    _programmingSlot = null;
     _programmingMessage = null;
     notifyListeners();
   }
@@ -897,14 +936,19 @@ class ReceiverProvider extends ChangeNotifier {
       return;
     }
 
+    final slot = _programmingSlot ?? _firstFreeSlot();
     final det = DetectorModel.fromPacket(pkt).copyWith(
       status: DetectorStatus.normal,
       lastEventCode: 0xAA,
+      slot: slot,
     );
     _detectors.add(det);
+    _detectors.sort((a, b) => a.slot.compareTo(b.slot));
     _db.saveDetector(det);
+    _programmedAt[detId] = DateTime.now();
 
     _isProgramming = false;
+    _programmingSlot = null;
     _programmingMessage = null;
     _lastProgrammedId = detId;
 
@@ -912,8 +956,8 @@ class ReceiverProvider extends ChangeNotifier {
       timestamp: DateTime.now(),
       type: EventType.detectorAdded,
       detectorId: detId,
-      detectorName: '${det.name} [$detId]',
-      description: 'Запрограммирован извещатель ${det.name} [$detId]',
+      detectorName: _detectorLabel(det),
+      description: 'Запрограммирован извещатель ${_detectorLabel(det)}',
     ));
     debugPrint('🆕 Извещатель запрограммирован: $detId (${det.name})');
     notifyListeners();
@@ -936,6 +980,7 @@ class ReceiverProvider extends ChangeNotifier {
     _alarmBorderActive.remove(detectorId);
     _alarmStartTimes.remove(detectorId);
     _lastAlarmPacket.remove(detectorId);
+    _programmedAt.remove(detectorId);
     await _db.deleteDetector(detectorId);
 
     _addEvent(EventModel(
@@ -1032,8 +1077,8 @@ class ReceiverProvider extends ChangeNotifier {
         timestamp: DateTime.now(),
         type: EventType.restored,
         detectorId: detectorId,
-        detectorName: _detectors[idx].name,
-        description: 'Тревога сброшена: ${_detectors[idx].name} [$detectorId]',
+        detectorName: _detectorLabel(_detectors[idx]),
+        description: 'Тревога сброшена: ${_detectorLabel(_detectors[idx])}',
       ));
     }
 
@@ -1079,8 +1124,8 @@ class ReceiverProvider extends ChangeNotifier {
         timestamp: DateTime.now(),
         type: EventType.armed,
         detectorId: detectorId,
-        detectorName: detector.name,
-        description: '${detector.name} поставлен на охрану',
+        detectorName: _detectorLabel(detector),
+        description: 'Поставлен на охрану: ${_detectorLabel(detector)}',
       ));
 
       notifyListeners();
@@ -1104,8 +1149,8 @@ class ReceiverProvider extends ChangeNotifier {
         timestamp: DateTime.now(),
         type: EventType.disarmed,
         detectorId: detectorId,
-        detectorName: detector.name,
-        description: '${detector.name} снят с охраны',
+        detectorName: _detectorLabel(detector),
+        description: 'Снят с охраны: ${_detectorLabel(detector)}',
       ));
 
       notifyListeners();
