@@ -33,6 +33,17 @@ class EventModel {
   final String description;
   final Map<String, dynamic>? data;
   bool isRead;
+  // Данные извещателя на момент события — для отправки на сервер
+  final String zoneName;
+  final String place;
+  final int? detectorSlot;
+
+  // Счётчик для уникальности id событий, созданных в одну миллисекунду
+  static int _seq = 0;
+  static String _newId() {
+    _seq = (_seq + 1) % 1000;
+    return '${DateTime.now().millisecondsSinceEpoch}-${_seq.toString().padLeft(3, '0')}';
+  }
 
   EventModel({
     String? id,
@@ -43,7 +54,38 @@ class EventModel {
     required this.description,
     this.data,
     this.isRead = false,
-  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
+    this.zoneName = '',
+    this.place = '',
+    this.detectorSlot,
+  }) : id = id ?? _newId();
+
+  EventModel copyWith({String? zoneName, String? place, int? detectorSlot}) =>
+      EventModel(
+        id: id,
+        timestamp: timestamp,
+        type: type,
+        detectorId: detectorId,
+        detectorName: detectorName,
+        description: description,
+        data: data,
+        isRead: isRead,
+        zoneName: zoneName ?? this.zoneName,
+        place: place ?? this.place,
+        detectorSlot: detectorSlot ?? this.detectorSlot,
+      );
+
+  /// Формат для серверного API (server_api/README.md). Время — в UTC.
+  Map<String, dynamic> toApiJson() => {
+        'id': id,
+        'timestamp': timestamp.toUtc().toIso8601String(),
+        'type': type.name,
+        'detectorId': detectorId,
+        'detectorSlot': detectorSlot,
+        'detectorName': detectorName,
+        'zoneName': zoneName,
+        'place': place,
+        'description': description,
+      };
 
   Map<String, dynamic> toJson() {
     return {
@@ -55,6 +97,9 @@ class EventModel {
       'description': description,
       'data': data,
       'isRead': isRead ? 1 : 0,
+      'zoneName': zoneName,
+      'place': place,
+      'detectorSlot': detectorSlot,
     };
   }
 
@@ -68,6 +113,9 @@ class EventModel {
       description: json['description'],
       data: json['data'],
       isRead: json['isRead'] == 1,
+      zoneName: json['zoneName'] ?? '',
+      place: json['place'] ?? '',
+      detectorSlot: json['detectorSlot'],
     );
   }
 

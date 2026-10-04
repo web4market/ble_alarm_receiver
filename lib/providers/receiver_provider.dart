@@ -7,6 +7,7 @@ import '../models/detector_model.dart';
 import '../models/event_model.dart';
 import '../services/database_service.dart';
 import '../services/audio_service.dart';
+import '../services/api_sync_service.dart';
 
 class ReceiverProvider extends ChangeNotifier {
   bool _isScanning = false;
@@ -1041,8 +1042,16 @@ class ReceiverProvider extends ChangeNotifier {
 
   // Добавить событие
   void _addEvent(EventModel event) {
+    // Дополняем событие зоной, местом и номером извещателя — они уходят на сервер
+    for (final d in _detectors) {
+      if (d.id == event.detectorId) {
+        event = event.copyWith(
+            zoneName: d.zoneName, place: d.place, detectorSlot: d.slot);
+        break;
+      }
+    }
     _events.insert(0, event);
-    _db.saveEvent(event);
+    _db.saveEvent(event).then((_) => ApiSyncService().onNewEvent());
 
     if (_events.length > 500) {
       _events = _events.take(500).toList();

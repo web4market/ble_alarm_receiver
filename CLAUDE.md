@@ -18,8 +18,9 @@ L50RA / L60RA / L70RA / V10RA. Целевой дизайн — [design.md](desig
   автопереподключение, состояние адаптера), разбор пакетов, программирование
   извещателей, охрана, журнал, батарея планшета, заводской сброс.
 - `providers/settings_provider.dart` — тема, шрифт, язык, пин-код, основное BT-устройство.
-- `services/database_service.dart` — sqflite (`alarm_receiver.db`, версия схемы 6),
+- `services/database_service.dart` — sqflite (`alarm_receiver.db`, версия схемы 7),
   таблицы `detectors`, `events`, `settings` (key/value), `zones` (устаревшая).
+- `services/api_sync_service.dart` — отправка журнала на сервер (очередь synced=0, пакеты, повторы).
 - `services/audio_service.dart` — сирена, предупреждение, короткий сигнал.
 - `screens/` — main (сетка блоков), settings, programming (программирование
   извещателей), onboarding (язык, пин-код), events, stats, help и др.

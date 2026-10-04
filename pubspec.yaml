@@ -27,6 +27,7 @@ dependencies:
   wakelock_plus: ^1.2.2
   audioplayers: ^6.0.0
   battery_plus: ^7.1.2
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:

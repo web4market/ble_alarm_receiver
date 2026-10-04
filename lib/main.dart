@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/receiver_provider.dart';
 import 'providers/settings_provider.dart';
+import 'services/api_sync_service.dart';
 import 'screens/main_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'theme/app_theme.dart';
@@ -19,6 +20,8 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ReceiverProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()..load()),
+        // Отправка журнала на сервер — работает в фоне всё время работы приложения
+        ChangeNotifierProvider.value(value: ApiSyncService()..start()),
       ],
       child: Consumer<SettingsProvider>(
         builder: (_, settings, __) => MaterialApp(

@@ -3,6 +3,8 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/receiver_provider.dart';
+import '../services/api_sync_service.dart';
+import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import 'help_screen.dart';
 import 'onboarding_screen.dart';
@@ -246,6 +248,7 @@ class SettingsScreen extends StatelessWidget {
 
     await receiver.factoryReset();
     settings.resetToDefaults();
+    ApiSyncService().reset();
     if (context.mounted) {
       Navigator.of(context).popUntil((r) => r.isFirst);
     }
@@ -999,6 +1002,26 @@ class _ServerApiBlockState extends State<_ServerApiBlock> {
   late final TextEditingController _login;
   late final TextEditingController _password;
   bool _showPassword = false;
+  bool _testing = false;
+  String? _testResult; // null — проверки не было; '' — успешно; иначе ошибка
+
+  Future<void> _setEnabled(bool v) async {
+    await widget.settings.setApiEnabled(v);
+    if (v) ApiSyncService().syncNow();
+  }
+
+  Future<void> _test() async {
+    setState(() {
+      _testing = true;
+      _testResult = null;
+    });
+    final err = await ApiSyncService().testConnection();
+    if (!mounted) return;
+    setState(() {
+      _testing = false;
+      _testResult = err ?? '';
+    });
+  }
 
   @override
   void initState() {
@@ -1029,7 +1052,7 @@ class _ServerApiBlockState extends State<_ServerApiBlock> {
       child: Column(
         children: [
           InkWell(
-            onTap: () => s.setApiEnabled(!enabled),
+            onTap: () => _setEnabled(!enabled),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
               child: Row(
@@ -1063,7 +1086,7 @@ class _ServerApiBlockState extends State<_ServerApiBlock> {
                   Checkbox(
                     value: enabled,
                     activeColor: _kAccBlue,
-                    onChanged: (v) => s.setApiEnabled(v ?? false),
+                    onChanged: (v) => _setEnabled(v ?? false),
                   ),
                 ],
               ),
@@ -1108,6 +1131,30 @@ class _ServerApiBlockState extends State<_ServerApiBlock> {
                           : null,
                     ),
                   ),
+                  if (enabled) ...[
+                    const SizedBox(height: 12),
+                    _SyncStatus(testing: _testing, testResult: _testResult),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      Expanded(
+                        child: _BleActionBtn(
+                          label: _testing ? 'Проверка...' : 'Проверить связь',
+                          icon: Icons.wifi_tethering,
+                          color: _kAccBlue,
+                          onTap: _testing ? () {} : _test,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _BleActionBtn(
+                          label: 'Отправить сейчас',
+                          icon: Icons.cloud_upload_outlined,
+                          color: _kAccGreen,
+                          onTap: ApiSyncService().syncNow,
+                        ),
+                      ),
+                    ]),
+                  ],
                 ],
               ),
             ),
@@ -1144,6 +1191,47 @@ class _ServerApiBlockState extends State<_ServerApiBlock> {
         border: const OutlineInputBorder(),
         suffixIcon: suffix,
       ),
+    );
+  }
+}
+
+// Строка состояния отправки журнала на сервер
+class _SyncStatus extends StatelessWidget {
+  final bool testing;
+  final String? testResult;
+  const _SyncStatus({required this.testing, required this.testResult});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    final sync = context.watch<ApiSyncService>();
+
+    final (IconData icon, Color color, String text) = switch (true) {
+      _ when testing => (Icons.sync, c.text2, 'Проверка связи...'),
+      _ when testResult != null && testResult!.isNotEmpty =>
+        (Icons.error_outline, _kAccRed, testResult!),
+      _ when testResult == '' => (Icons.check_circle_outline, _kAccGreen, 'Связь с сервером есть, вход выполнен'),
+      _ when sync.lastError != null => (Icons.cloud_off, _kAccRed, sync.lastError!),
+      _ when sync.isOnline => (Icons.cloud_done_outlined, _kAccGreen, 'Связь с сервером есть'),
+      _ => (Icons.cloud_queue, c.text2, 'Ожидание отправки'),
+    };
+
+    final last = sync.lastSuccessAt;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Expanded(child: Text(text, style: TextStyle(fontSize: 12, color: color))),
+        ]),
+        const SizedBox(height: 4),
+        Text(
+          'Не отправлено событий: ${sync.pendingCount}'
+          '${last != null ? '  •  последняя отправка: ${DateFormat('dd.MM.yyyy HH:mm:ss').format(last)}' : ''}',
+          style: TextStyle(fontSize: 11, color: c.text2),
+        ),
+      ],
     );
   }
 }

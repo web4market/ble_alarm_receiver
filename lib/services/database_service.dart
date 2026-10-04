@@ -20,7 +20,7 @@ class DatabaseService {
     String path = join(await getDatabasesPath(), 'alarm_receiver.db');
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -57,7 +57,11 @@ class DatabaseService {
         detectorName TEXT,
         description TEXT,
         data TEXT,
-        isRead INTEGER
+        isRead INTEGER,
+        zoneName TEXT DEFAULT '',
+        place TEXT DEFAULT '',
+        detectorSlot INTEGER,
+        synced INTEGER DEFAULT 0
       )
     ''');
 
@@ -114,6 +118,15 @@ class DatabaseService {
         await db.update('detectors', {'slot': i + 1},
             where: 'id = ?', whereArgs: [rows[i]['id']]);
       }
+    }
+    if (oldVersion < 7) {
+      // Отправка журнала на сервер: данные извещателя в событии и флаг
+      // синхронизации (0 — не отправлено, 1 — принято сервером,
+      // 2 — отклонено сервером/слишком старое, повторно не отправляется)
+      try { await db.execute("ALTER TABLE events ADD COLUMN zoneName TEXT DEFAULT ''"); } catch (_) {}
+      try { await db.execute("ALTER TABLE events ADD COLUMN place TEXT DEFAULT ''"); } catch (_) {}
+      try { await db.execute('ALTER TABLE events ADD COLUMN detectorSlot INTEGER'); } catch (_) {}
+      try { await db.execute('ALTER TABLE events ADD COLUMN synced INTEGER DEFAULT 0'); } catch (_) {}
     }
   }
 
@@ -306,6 +319,49 @@ class DatabaseService {
 
     return List.generate(maps.length, (i) {
       return EventModel.fromJson(maps[i]);
+    });
+  }
+
+  // ── Синхронизация с сервером ────────────────────────────────────────────
+
+  static const int syncPending = 0;
+  static const int syncDone = 1;
+  static const int syncRejected = 2;
+
+  // Неотправленные события, старые первыми
+  Future<List<EventModel>> getUnsyncedEvents({int limit = 200}) async {
+    final db = await database;
+    final maps = await db.query(
+      'events',
+      where: 'synced = ?',
+      whereArgs: [syncPending],
+      orderBy: 'timestamp ASC',
+      limit: limit,
+    );
+    return maps.map(EventModel.fromJson).toList();
+  }
+
+  Future<int> countUnsyncedEvents() async {
+    final db = await database;
+    final r = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM events WHERE synced = ?', [syncPending]);
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  Future<void> setEventsSynced(List<String> ids, int status) async {
+    if (ids.isEmpty) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      // По 500 id за запрос — ограничение SQLite на число параметров
+      for (var i = 0; i < ids.length; i += 500) {
+        final chunk = ids.sublist(i, i + 500 > ids.length ? ids.length : i + 500);
+        await txn.update(
+          'events',
+          {'synced': status},
+          where: 'id IN (${List.filled(chunk.length, '?').join(',')})',
+          whereArgs: chunk,
+        );
+      }
     });
   }
 
