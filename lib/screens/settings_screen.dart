@@ -1280,15 +1280,26 @@ class _AlarmPopupRowState extends State<_AlarmPopupRow>
   @override
   Widget build(BuildContext context) {
     final granted = _granted ?? false;
-    return _SettingsRow(
-      icon: Icons.open_in_full,
-      title: 'Всплывать при тревоге',
-      subtitle: _granted == null
-          ? 'Проверка...'
-          : granted
-              ? 'Включено: свёрнутое приложение откроется на весь экран'
-              : 'Выключено — нажмите и разрешите «Поверх других приложений»',
-      onTap: AppForeground.requestOverlayPermission,
-    );
+    return Column(children: [
+      _SettingsRow(
+        icon: Icons.open_in_full,
+        title: 'Всплывать при тревоге',
+        subtitle: _granted == null
+            ? 'Проверка...'
+            : granted
+                ? 'Разрешение «Поверх других приложений» выдано'
+                : 'Выключено — нажмите и разрешите «Поверх других приложений»',
+        onTap: AppForeground.requestOverlayPermission,
+      ),
+      // Прошивки Xiaomi/Redmi/POCO, Huawei/Honor блокируют запуск из фона
+      // отдельным собственным разрешением
+      _SettingsRow(
+        icon: Icons.phonelink_setup,
+        title: 'Всплывающие окна в фоне (Xiaomi, Huawei)',
+        subtitle: 'Разрешения → «Отображать всплывающие окна, когда приложение '
+            'работает в фоне». Также: Уведомления → «Тревога» включены',
+        onTap: AppForeground.openAppSettings,
+      ),
+    ]);
   }
 }

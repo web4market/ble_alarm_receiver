@@ -874,7 +874,7 @@ class ReceiverProvider extends ChangeNotifier {
       _alarmBorderActive[detId] = true;
       if (_soundEnabled) _audio.playAlarm();
       // Приложение свёрнуто — всплываем на весь экран
-      AppForeground.bringToFront();
+      AppForeground.bringToFront(label);
     } else if (evtCode == 0xA8 || evtCode == 0x58) {
       if (_soundEnabled) _audio.playWarning();
     }
