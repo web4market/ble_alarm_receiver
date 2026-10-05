@@ -254,7 +254,7 @@ class _DetectorTileState extends State<DetectorTile>
                     widget.detector.status == DetectorStatus.lowBattery
                         ? Icons.battery_alert
                         : Icons.battery_full_rounded,
-                    size: 13,
+                    size: 15,
                     color: widget.detector.status == DetectorStatus.lowBattery
                         ? const Color(0xFFFFAA00)
                         : c.tileTextDim,
@@ -264,7 +264,7 @@ class _DetectorTileState extends State<DetectorTile>
                     widget.detector.status == DetectorStatus.tamper
                         ? Icons.lock_open_rounded
                         : Icons.lock_rounded,
-                    size: 13,
+                    size: 15,
                     color: widget.detector.status == DetectorStatus.tamper
                         ? const Color(0xFFAA44FF)
                         : c.tileTextDim,

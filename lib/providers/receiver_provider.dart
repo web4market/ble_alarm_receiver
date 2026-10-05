@@ -8,6 +8,7 @@ import '../models/event_model.dart';
 import '../services/database_service.dart';
 import '../services/audio_service.dart';
 import '../services/api_sync_service.dart';
+import '../services/app_foreground.dart';
 
 class ReceiverProvider extends ChangeNotifier {
   bool _isScanning = false;
@@ -872,6 +873,8 @@ class ReceiverProvider extends ChangeNotifier {
       _alarmStartTimes[detId] = now;
       _alarmBorderActive[detId] = true;
       if (_soundEnabled) _audio.playAlarm();
+      // Приложение свёрнуто — всплываем на весь экран
+      AppForeground.bringToFront();
     } else if (evtCode == 0xA8 || evtCode == 0x58) {
       if (_soundEnabled) _audio.playWarning();
     }
@@ -1077,7 +1080,10 @@ class ReceiverProvider extends ChangeNotifier {
     _alarmBorderActive.remove(detectorId);
     _alarmStartTimes.remove(detectorId);
     // Останавливаем сирену если больше нет активных тревог
-    if (_alarmBorderActive.isEmpty) _audio.stop();
+    if (_alarmBorderActive.isEmpty) {
+      _audio.stop();
+      AppForeground.releaseLockScreen();
+    }
 
     if (_detectors[idx].status == DetectorStatus.alarm ||
         _detectors[idx].status == DetectorStatus.tamper) {
@@ -1100,6 +1106,7 @@ class ReceiverProvider extends ChangeNotifier {
     _alarmBorderActive.clear();
     _alarmStartTimes.clear();
     _audio.stop();
+    AppForeground.releaseLockScreen();
 
     for (int i = 0; i < _detectors.length; i++) {
       if (_detectors[i].status == DetectorStatus.alarm ||

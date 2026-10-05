@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/receiver_provider.dart';
 import '../services/api_sync_service.dart';
+import '../services/app_foreground.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import 'help_screen.dart';
@@ -163,6 +164,7 @@ class SettingsScreen extends StatelessWidget {
                 onTap: () => Navigator.push(ctx,
                     MaterialPageRoute(builder: (_) => const SoundSettingsPage())),
               ),
+              const _AlarmPopupRow(),
               _ServerApiBlock(settings: settings),
               _SectionHeader('ИНФОРМАЦИЯ'),
               _SettingsRow(
@@ -1232,6 +1234,61 @@ class _SyncStatus extends StatelessWidget {
           style: TextStyle(fontSize: 11, color: c.text2),
         ),
       ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Уведомления → Всплывать при тревоге (разрешение «Поверх других приложений»)
+// ════════════════════════════════════════════════════════════════════════════
+
+class _AlarmPopupRow extends StatefulWidget {
+  const _AlarmPopupRow();
+
+  @override
+  State<_AlarmPopupRow> createState() => _AlarmPopupRowState();
+}
+
+class _AlarmPopupRowState extends State<_AlarmPopupRow>
+    with WidgetsBindingObserver {
+  bool? _granted;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _check();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Вернулись из системных настроек — перепроверяем разрешение
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _check();
+  }
+
+  Future<void> _check() async {
+    final g = await AppForeground.canDrawOverlays();
+    if (mounted) setState(() => _granted = g);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final granted = _granted ?? false;
+    return _SettingsRow(
+      icon: Icons.open_in_full,
+      title: 'Всплывать при тревоге',
+      subtitle: _granted == null
+          ? 'Проверка...'
+          : granted
+              ? 'Включено: свёрнутое приложение откроется на весь экран'
+              : 'Выключено — нажмите и разрешите «Поверх других приложений»',
+      onTap: AppForeground.requestOverlayPermission,
     );
   }
 }

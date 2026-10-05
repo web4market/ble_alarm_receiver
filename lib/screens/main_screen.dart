@@ -11,6 +11,8 @@ import '../providers/settings_provider.dart';
 import '../screens/settings_screen.dart';
 import '../screens/help_screen.dart';
 import '../theme/app_theme.dart';
+import '../services/app_foreground.dart';
+import '../services/database_service.dart';
 import '../widgets/export_sheet.dart';
 import '../widgets/detector_tile.dart';
 
@@ -47,6 +49,38 @@ class _MainScreenState extends State<MainScreen> {
     final receiver = context.read<ReceiverProvider>();
     await receiver.requestPermissions();
     receiver.startAutoReconnect();
+    await _askOverlayPermissionOnce();
+  }
+
+  // Без разрешения «Поверх других приложений» свёрнутое приложение не сможет
+  // всплыть при тревоге. Спрашиваем один раз; дальше — в настройках.
+  Future<void> _askOverlayPermissionOnce() async {
+    if (await AppForeground.canDrawOverlays()) return;
+    final db = DatabaseService();
+    if (await db.getSetting('overlayAsked') == '1') return;
+    await db.saveSetting('overlayAsked', '1');
+    if (!mounted) return;
+    final c = appColors(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: const Text('Всплытие при тревоге'),
+        content: const Text(
+            'Чтобы при тревоге свёрнутое приложение само открывалось на весь '
+            'экран, разрешите ему показ «Поверх других приложений».\n\n'
+            'Это можно сделать и позже: Настройки → Всплывать при тревоге.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dCtx, false),
+              child: const Text('Позже')),
+          TextButton(
+              onPressed: () => Navigator.pop(dCtx, true),
+              child: const Text('Разрешить')),
+        ],
+      ),
+    );
+    if (ok == true) await AppForeground.requestOverlayPermission();
   }
 
   @override

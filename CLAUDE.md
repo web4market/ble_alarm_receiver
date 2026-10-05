@@ -21,6 +21,7 @@ L50RA / L60RA / L70RA / V10RA. Целевой дизайн — [design.md](desig
 - `services/database_service.dart` — sqflite (`alarm_receiver.db`, версия схемы 7),
   таблицы `detectors`, `events`, `settings` (key/value), `zones` (устаревшая).
 - `services/api_sync_service.dart` — отправка журнала на сервер (очередь synced=0, пакеты, повторы).
+- `services/app_foreground.dart` + `android/.../MainActivity.kt` — всплытие на передний план при тревоге (SYSTEM_ALERT_WINDOW).
 - `services/audio_service.dart` — сирена, предупреждение, короткий сигнал.
 - `screens/` — main (сетка блоков), settings, programming (программирование
   извещателей), onboarding (язык, пин-код), events, stats, help и др.
@@ -28,6 +29,7 @@ L50RA / L60RA / L70RA / V10RA. Целевой дизайн — [design.md](desig
 
 ## Серверное API (`server_api/`)
 PHP 8.1+, mysqli, JSON, Bearer-токен. Документация — `server_api/README.md`.
+Веб-панель управления планшетами — `public/admin.php` (вход администратора по хэшу из config.php).
 Формат события = поля EventModel + `detectorSlot`, `zoneName`, `place`; `type` — имя
 EventType строкой. Новый EventType нужно добавить и в `EVENT_TYPES` (`server_api/src/handlers.php`).
 
