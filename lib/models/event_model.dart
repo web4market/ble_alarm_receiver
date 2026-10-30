@@ -22,6 +22,8 @@ enum EventType {
   btAdapterOff,      // Bluetooth выключен на планшете
   btAdapterOn,       // Bluetooth включён на планшете
   tabletBatteryLow,  // низкий заряд батареи планшета
+  powerLost,         // планшет перешёл на аккумулятор (нет внешнего питания)
+  powerRestored,     // внешнее питание восстановлено
 }
 
 class EventModel {
@@ -161,6 +163,10 @@ class EventModel {
         return Icons.bluetooth;
       case EventType.tabletBatteryLow:
         return Icons.battery_alert;
+      case EventType.powerLost:
+        return Icons.power_off;
+      case EventType.powerRestored:
+        return Icons.power;
     }
   }
 
@@ -200,6 +206,10 @@ class EventModel {
         return Colors.grey;
       case EventType.tabletBatteryLow:
         return Colors.orange;
+      case EventType.powerLost:
+        return Colors.red;
+      case EventType.powerRestored:
+        return Colors.green;
     }
   }
 }

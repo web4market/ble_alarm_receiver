@@ -24,7 +24,6 @@ class ReceiverProvider extends ChangeNotifier {
   StreamSubscription? _connectionSubscription;
   StreamSubscription<List<int>>? _notificationSubscription;
   StreamSubscription? _pairingScanSubscription;
-  Timer? _connectionMonitorTimer;
 
   // ── Основное BT-устройство и автоподключение ────────────────────────────
   // id сохраняется в таблице settings (ключ primaryDeviceId). Пока он есть,
@@ -34,7 +33,19 @@ class ReceiverProvider extends ChangeNotifier {
   bool _manualDisconnect = false; // пользователь отключился вручную
   bool _isConnecting = false;
   bool _btLostLogged = false;     // потеря связи уже записана в журнал
+  // Связь с BT потеряна (не ручное отключение): кнопка «СВЯЗЬ» красная,
+  // короткий сигнал каждые 10 с до восстановления связи
+  bool _btLost = false;
+  bool _systemArmed = false;
+  Timer? _btLostBeepTimer;
+  static const Duration _btLostBeepInterval = Duration(seconds: 10);
   Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
+  // Данные из БД загружены (id основного устройства известен)
+  final Completer<void> _ready = Completer<void>();
+  /// Вызывается, когда устройство найдено автопоиском и запомнено как основное
+  /// (main_screen передаёт сюда SettingsProvider.setPrimaryDevice)
+  void Function(String remoteId, String name)? onPrimaryDeviceSaved;
   StreamSubscription<BluetoothConnectionState>? _deviceStateSub;
   StreamSubscription<BluetoothAdapterState>? _adapterStateSub;
   BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
@@ -60,6 +71,15 @@ class ReceiverProvider extends ChangeNotifier {
   Timer? _batteryTimer;
   int? _lastLoggedBatteryThreshold;
   static const List<int> _batteryThresholds = [20, 10];
+
+  // ── Питание планшета ────────────────────────────────────────────────────
+  // От сети (зарядное устройство) или от аккумулятора. На аккумуляторе —
+  // короткий сигнал каждую минуту и пульсация блока «ПИТАНИЕ».
+  int? _batteryLevel;
+  BatteryState? _batteryState;
+  StreamSubscription<BatteryState>? _batteryStateSub;
+  Timer? _powerBeepTimer;
+  static const Duration _powerBeepInterval = Duration(minutes: 1);
 
   // Alarm tracking
   final Map<String, DateTime> _alarmStartTimes = {};
@@ -115,6 +135,17 @@ class ReceiverProvider extends ChangeNotifier {
   bool get soundEnabled => _soundEnabled;
   Map<int, String> get zoneNames => Map.unmodifiable(_zoneNames);
   bool get isConnecting => _isConnecting;
+  bool get btLost => _btLost;
+  /// Система на охране (кнопка «ВКЛ ВСЕ» / «ВЫКЛ ВСЕ»), хранится в settings
+  bool get systemArmed => _systemArmed;
+  int? get tabletBatteryLevel => _batteryLevel;
+  /// null — состояние ещё неизвестно
+  bool? get onExternalPower =>
+      _batteryState == null || _batteryState == BatteryState.unknown
+          ? null
+          : _batteryState != BatteryState.discharging;
+  bool get tabletCharging => _batteryState == BatteryState.charging;
+  bool get tabletBatteryFull => _batteryState == BatteryState.full;
   String? get primaryDeviceId => _primaryDeviceId;
   bool get isProgramming => _isProgramming;
   int? get programmingSlot => _programmingSlot;
@@ -178,8 +209,12 @@ class ReceiverProvider extends ChangeNotifier {
     await _db.updateDetectorPlace(detectorId, trimmed);
   }
 
-  void toggleSound() {
-    _soundEnabled = !_soundEnabled;
+  // Выключение звука требует пин-кода — проверяет вызывающий экран
+  void toggleSound() => setSoundEnabled(!_soundEnabled);
+
+  void setSoundEnabled(bool on) {
+    _soundEnabled = on;
+    if (!on) _audio.stop();
     notifyListeners();
   }
 
@@ -199,53 +234,29 @@ class ReceiverProvider extends ChangeNotifier {
   // Инициализация
   ReceiverProvider() {
     _loadData();
-    _startConnectionMonitor();
     _startBatteryMonitor();
   }
 
   // Загрузка данных из БД
   Future<void> _loadData() async {
     _detectors = await _db.getDetectors();
+    // Извещатели в покое не выходят на связь (экономия батареи), поэтому
+    // статуса «нет связи» у них нет — сбрасываем оставшийся от старых версий
+    for (var i = 0; i < _detectors.length; i++) {
+      if (_detectors[i].status == DetectorStatus.offline) {
+        _detectors[i] = _detectors[i].copyWith(status: DetectorStatus.normal);
+      }
+    }
     _events = await _db.getEvents(limit: 200);
     _zoneNames = await _db.getZoneNames();
     _primaryDeviceId = await _db.getSetting('primaryDeviceId');
     _primaryDeviceName = await _db.getSetting('primaryDeviceName');
+    final armed = await _db.getSetting('systemArmed');
+    _systemArmed = armed != null
+        ? armed == '1'
+        : _detectors.isNotEmpty && _detectors.every((d) => d.isArmed);
+    if (!_ready.isCompleted) _ready.complete();
     notifyListeners();
-  }
-
-  // Мониторинг соединения
-  void _startConnectionMonitor() {
-    _connectionMonitorTimer =
-        Timer.periodic(const Duration(seconds: 30), (timer) {
-      _checkDetectorsOffline();
-    });
-  }
-
-  // Проверка на отсутствие связи
-  void _checkDetectorsOffline() {
-    var now = DateTime.now();
-    bool changed = false;
-
-    for (var detector in _detectors) {
-      if (detector.isActive &&
-          now.difference(detector.lastSeen).inMinutes > 5 &&
-          detector.status != DetectorStatus.offline) {
-        detector.status = DetectorStatus.offline;
-        changed = true;
-
-        _addEvent(EventModel(
-          timestamp: now,
-          type: EventType.disconnected,
-          detectorId: detector.id,
-          detectorName: _detectorLabel(detector),
-          description: 'Потеря связи с ${_detectorLabel(detector)}',
-        ));
-      }
-    }
-
-    if (changed) {
-      notifyListeners();
-    }
   }
 
   // Запрос разрешений
@@ -474,6 +485,8 @@ class ReceiverProvider extends ChangeNotifier {
 
       _isConnected = true;
       _btLostLogged = false;
+      _setBtLost(false);
+      if (_soundEnabled) _audio.playConnected();
 
       // Следим за состоянием соединения: при обрыве — запись в журнал,
       // короткий звуковой сигнал и автоматическое переподключение.
@@ -546,7 +559,22 @@ class ReceiverProvider extends ChangeNotifier {
         description: 'Потеря связи с BT-устройством'
             '${_connectedHub != null ? ' ${_hubLabel(_connectedHub!)}' : ''}',
       ));
-      if (_soundEnabled) _audio.playShortBeep();
+    }
+    _setBtLost(true);
+    notifyListeners();
+  }
+
+  void _setBtLost(bool lost) {
+    if (lost && (_primaryDeviceId == null || _manualDisconnect)) lost = false;
+    if (lost == _btLost) return;
+    _btLost = lost;
+    _btLostBeepTimer?.cancel();
+    _btLostBeepTimer = null;
+    if (lost) {
+      if (_soundEnabled) _audio.playBtLostBeep();
+      _btLostBeepTimer = Timer.periodic(_btLostBeepInterval, (_) {
+        if (_soundEnabled) _audio.playBtLostBeep();
+      });
     }
     notifyListeners();
   }
@@ -648,6 +676,7 @@ class ReceiverProvider extends ChangeNotifier {
   // «Забыть устройство» — автоподключение прекращается
   Future<void> forgetPrimaryDevice() async {
     await disconnectFromHub();
+    _setBtLost(false);
     _primaryDeviceId = null;
     _primaryDeviceName = null;
     _connectedHub = null;
@@ -683,7 +712,11 @@ class ReceiverProvider extends ChangeNotifier {
         detectorName: 'Система',
         description: 'Bluetooth выключен на планшете',
       ));
-      if (_isConnected) _onHubDisconnected();
+      if (_isConnected) {
+        _onHubDisconnected();
+      } else {
+        _setBtLost(true);
+      }
     } else if (state == BluetoothAdapterState.on) {
       _addEvent(EventModel(
         timestamp: DateTime.now(),
@@ -696,15 +729,93 @@ class ReceiverProvider extends ChangeNotifier {
     }
   }
 
+  // Попытка подключения (при старте и каждые 10 с, пока нет связи):
+  //  - устройство сохранено: попеременно прямое подключение по id и поиск
+  //    в эфире по id (после перезагрузки планшета Android часто не может
+  //    подключиться напрямую, пока устройство не найдено поиском);
+  //  - устройство не сохранено: поиск концентратора по имени
+  //    (TARGET_DEVICE_NAMES), подключение и запоминание как основного.
   Future<void> _tryReconnect() async {
-    final id = _primaryDeviceId;
-    if (id == null || id.isEmpty) return;
+    await _ready.future;
     if (_isConnected || _isConnecting || _manualDisconnect) return;
+    if (_isScanning || _isPairingScan) return;
     if (_adapterState == BluetoothAdapterState.off) return;
 
-    debugPrint('🔁 Автоподключение к сохранённому устройству $id...');
-    await connectToHub(BluetoothDevice.fromId(id),
-        timeout: const Duration(seconds: 8));
+    final id = _primaryDeviceId;
+    final hasSaved = id != null && id.isNotEmpty;
+    final direct = hasSaved && _reconnectAttempts.isEven;
+    _reconnectAttempts++;
+
+    if (direct) {
+      debugPrint('🔁 Подключение к сохранённому устройству $id...');
+      await connectToHub(BluetoothDevice.fromId(id),
+          timeout: const Duration(seconds: 8));
+    } else {
+      await _scanAndConnect(targetId: hasSaved ? id : null);
+    }
+
+    if (_isConnected) {
+      _reconnectAttempts = 0;
+    } else if (!_manualDisconnect) {
+      // Не удалось — связь потеряна (только если устройство было сохранено)
+      _setBtLost(true);
+    }
+  }
+
+  // Поиск концентратора в эфире (до 8 с) и подключение к нему
+  Future<void> _scanAndConnect({String? targetId}) async {
+    final found = Completer<ScanResult?>();
+    StreamSubscription<List<ScanResult>>? sub;
+    try {
+      _isScanning = true;
+      notifyListeners();
+      debugPrint(targetId != null
+          ? '▶️ Поиск сохранённого устройства $targetId в эфире...'
+          : '▶️ Поиск концентратора по имени...');
+
+      sub = FlutterBluePlus.scanResults.listen((results) {
+        for (final r in results) {
+          final match = targetId != null
+              ? r.device.remoteId.toString() == targetId
+              : _isTargetName(scanResultName(r));
+          if (match && !found.isCompleted) found.complete(r);
+        }
+      });
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 8),
+        androidUsesFineLocation: false,
+      );
+      final r = await found.future
+          .timeout(const Duration(seconds: 9), onTimeout: () => null);
+      await FlutterBluePlus.stopScan();
+      await sub.cancel();
+      sub = null;
+      _isScanning = false;
+      notifyListeners();
+      if (r == null) {
+        debugPrint('ℹ️ Концентратор в эфире не найден');
+        return;
+      }
+
+      final name = scanResultName(r);
+      debugPrint('✅ Найден "$name" (${r.device.remoteId}) — подключаемся');
+      await connectToHub(r.device);
+
+      // Найден автопоиском впервые — запоминаем как основное устройство
+      if (_isConnected && (_primaryDeviceId == null || _primaryDeviceId!.isEmpty)) {
+        _primaryDeviceId = r.device.remoteId.toString();
+        _primaryDeviceName = name;
+        await _db.saveSetting('primaryDeviceId', _primaryDeviceId!);
+        await _db.saveSetting('primaryDeviceName', name);
+        onPrimaryDeviceSaved?.call(_primaryDeviceId!, name);
+        debugPrint('⭐ "$name" запомнен как основное устройство');
+      }
+    } catch (e) {
+      debugPrint('❌ Ошибка поиска концентратора: $e');
+      await sub?.cancel();
+      _isScanning = false;
+      notifyListeners();
+    }
   }
 
   // ========== ПАРСИНГ ПАКЕТА ПО ПЕРВЫМ 6 БАЙТАМ ==========
@@ -784,6 +895,7 @@ class ReceiverProvider extends ChangeNotifier {
   Future<void> disconnectFromHub() async {
     try {
       _manualDisconnect = true;
+      _setBtLost(false);
       _audio.stop();
       final wasConnected = _isConnected;
       await _deviceStateSub?.cancel();
@@ -813,6 +925,7 @@ class ReceiverProvider extends ChangeNotifier {
   // Ручное подключение (кнопка «Подключиться») — снимает паузу автоподключения
   Future<void> reconnectNow() async {
     _manualDisconnect = false;
+    _reconnectAttempts = 0;
     await _tryReconnect();
   }
 
@@ -1004,14 +1117,64 @@ class ReceiverProvider extends ChangeNotifier {
 
   void _startBatteryMonitor() {
     _batteryTimer =
-        Timer.periodic(const Duration(minutes: 1), (_) => _checkBattery());
+        Timer.periodic(const Duration(seconds: 30), (_) => _checkBattery());
+    _batteryStateSub = _battery.onBatteryStateChanged.listen((st) {
+      _onPowerState(st);
+      _checkBattery();
+    });
     _checkBattery();
+  }
+
+  // Переход «сеть ↔ аккумулятор»: журнал, сигнал раз в минуту на аккумуляторе
+  void _onPowerState(BatteryState st) {
+    final prev = _batteryState;
+    if (st == prev) return;
+    _batteryState = st;
+    final wasExternal = prev == null || prev == BatteryState.unknown
+        ? null
+        : prev != BatteryState.discharging;
+    final external = onExternalPower;
+
+    if (external == false) {
+      _powerBeepTimer ??= Timer.periodic(_powerBeepInterval, (_) {
+        if (_soundEnabled) _audio.playPowerBeep();
+      });
+      if (wasExternal == true) {
+        _addEvent(EventModel(
+          timestamp: DateTime.now(),
+          type: EventType.powerLost,
+          detectorId: 'system',
+          detectorName: 'Планшет',
+          description: 'Нет внешнего питания: планшет работает от аккумулятора'
+              '${_batteryLevel != null ? ' ($_batteryLevel%)' : ''}',
+        ));
+        if (_soundEnabled) _audio.playPowerBeep();
+      }
+    } else if (external == true) {
+      _powerBeepTimer?.cancel();
+      _powerBeepTimer = null;
+      if (wasExternal == false) {
+        _addEvent(EventModel(
+          timestamp: DateTime.now(),
+          type: EventType.powerRestored,
+          detectorId: 'system',
+          detectorName: 'Планшет',
+          description: 'Внешнее питание восстановлено',
+        ));
+      }
+    }
+    notifyListeners();
   }
 
   Future<void> _checkBattery() async {
     try {
       final level = await _battery.batteryLevel;
       final state = await _battery.batteryState;
+      if (level != _batteryLevel) {
+        _batteryLevel = level;
+        notifyListeners();
+      }
+      _onPowerState(state);
       final charging =
           state == BatteryState.charging || state == BatteryState.full;
 
@@ -1228,11 +1391,15 @@ class ReceiverProvider extends ChangeNotifier {
   // Поставить все на охрану
   Future<void> armAll() async {
     int count = 0;
+    _systemArmed = true;
+    notifyListeners();
+    await _db.saveSetting('systemArmed', '1');
 
     for (var detector in _detectors) {
       if (!detector.isArmed) {
         detector.isArmed = true;
         count++;
+        await _db.updateDetectorArmed(detector.id, true);
       }
     }
 
@@ -1255,11 +1422,15 @@ class ReceiverProvider extends ChangeNotifier {
   // Снять все с охраны
   Future<void> disarmAll() async {
     int count = 0;
+    _systemArmed = false;
+    notifyListeners();
+    await _db.saveSetting('systemArmed', '0');
 
     for (var detector in _detectors) {
       if (detector.isArmed) {
         detector.isArmed = false;
         count++;
+        await _db.updateDetectorArmed(detector.id, false);
       }
       // Сбрасываем все тревоги
       if (detector.status == DetectorStatus.alarm) {
@@ -1366,6 +1537,10 @@ class ReceiverProvider extends ChangeNotifier {
         return 'BT ВКЛ';
       case EventType.tabletBatteryLow:
         return 'РАЗРЯД ПЛАНШЕТА';
+      case EventType.powerLost:
+        return 'НЕТ ПИТАНИЯ';
+      case EventType.powerRestored:
+        return 'ПИТАНИЕ ЕСТЬ';
     }
   }
 
@@ -1417,6 +1592,7 @@ class ReceiverProvider extends ChangeNotifier {
     _connectedHub = null;
     _isProgramming = false;
     _manualDisconnect = false;
+    _setBtLost(false);
     _zoneNames = await _db.getZoneNames();
     notifyListeners();
   }
@@ -1425,6 +1601,9 @@ class ReceiverProvider extends ChangeNotifier {
   void dispose() {
     _reconnectTimer?.cancel();
     _batteryTimer?.cancel();
+    _batteryStateSub?.cancel();
+    _powerBeepTimer?.cancel();
+    _btLostBeepTimer?.cancel();
     _deviceStateSub?.cancel();
     _adapterStateSub?.cancel();
     _cancelCharSubs();
@@ -1432,7 +1611,6 @@ class ReceiverProvider extends ChangeNotifier {
     _connectionSubscription?.cancel();
     _notificationSubscription?.cancel();
     _pairingScanSubscription?.cancel();
-    _connectionMonitorTimer?.cancel();
     _connectedHub?.disconnect();
     _audio.dispose();
     super.dispose();

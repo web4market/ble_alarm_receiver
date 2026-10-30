@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/detector_model.dart';
 import '../providers/receiver_provider.dart';
 import '../theme/app_theme.dart';
+import 'onboarding_screen.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 // Настройки → Программирование извещателей
@@ -21,7 +22,7 @@ class ProgrammingScreen extends StatefulWidget {
   State<ProgrammingScreen> createState() => _ProgrammingScreenState();
 }
 
-const double _kTile = 160;
+const double _kTile = 240;
 const double _kGap = 10;
 const double _kPad = 12;
 
@@ -124,7 +125,7 @@ class _ProgrammingScreenState extends State<ProgrammingScreen> {
                         noDetectors: prov.detectors.isEmpty,
                         onTap: waiting
                             ? prov.stopProgramming
-                            : () => prov.startProgramming(slot),
+                            : () => _startProgramming(slot),
                       );
                     },
                   );
@@ -151,8 +152,11 @@ class _ProgrammingScreenState extends State<ProgrammingScreen> {
         title: Text(isNew
             ? '№${d.slot}: новый извещатель ${d.name} [${d.id}]'
             : '№${d.slot}: ${d.name} [${d.id}]'),
+        // Прокрутка: при открытой клавиатуре окно низкое, и два поля
+        // (особенно при крупном шрифте) иначе не помещаются
+        scrollable: true,
         content: SizedBox(
-          width: 360,
+          width: 520,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -219,7 +223,18 @@ class _ProgrammingScreenState extends State<ProgrammingScreen> {
         ],
       ),
     );
-    if (ok == true) await _prov.deleteDetector(d.id);
+    if (ok != true || !mounted) return;
+    // Удаление извещателя — только по пин-коду
+    final pinOk = await showPinCheckDialog(context,
+        title: 'Удаление извещателя', message: '№${d.slot} ${d.name} [${d.id}]');
+    if (pinOk) await _prov.deleteDetector(d.id);
+  }
+
+  // Добавление извещателя — только по пин-коду
+  Future<void> _startProgramming(int slot) async {
+    final ok = await showPinCheckDialog(context,
+        title: 'Добавление извещателя', message: 'Номер №$slot');
+    if (ok && mounted) _prov.startProgramming(slot);
   }
 }
 

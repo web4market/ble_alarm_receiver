@@ -405,6 +405,10 @@ class _EventsScreenState extends State<EventsScreen> {
         return 'BT_ВКЛ';
       case EventType.tabletBatteryLow:
         return 'ПЛ_БАТ';
+      case EventType.powerLost:
+        return 'ПИТ-';
+      case EventType.powerRestored:
+        return 'ПИТ+';
     }
   }
 
@@ -450,6 +454,10 @@ class _EventsScreenState extends State<EventsScreen> {
         return 'Bluetooth включён';
       case EventType.tabletBatteryLow:
         return 'Разряд планшета';
+      case EventType.powerLost:
+        return 'Нет внешнего питания';
+      case EventType.powerRestored:
+        return 'Питание восстановлено';
     }
   }
 }

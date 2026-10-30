@@ -4,9 +4,10 @@ import '../services/database_service.dart';
 class SettingsProvider extends ChangeNotifier {
   final DatabaseService _db = DatabaseService();
 
-  // Масштаб шрифта: 100% (по умолчанию) — минимум, дальше только увеличение
-  static const double minFontScale = 1.0;
-  static const double maxFontScale = 2.0;
+  // 100% — размер по умолчанию (базовая величина kBaseFontScale);
+  // в настройках можно уменьшить до 50% или увеличить до 150%
+  static const double minFontScale = 0.5;
+  static const double maxFontScale = 1.5;
 
   double    _fontScale  = 1.0;
   ThemeMode _themeMode  = ThemeMode.dark;

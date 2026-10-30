@@ -162,7 +162,7 @@ class _DetectorTileState extends State<DetectorTile>
           child: Stack(children: [
             // Zone + place labels — top left (редактирование только в настройках программирования)
             Positioned(
-              top: 5, left: 8, right: 28,
+              top: 5, left: 8, right: 40,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -194,13 +194,13 @@ class _DetectorTileState extends State<DetectorTile>
                 child: GestureDetector(
                   onTap: widget.onResetAlarm,
                   child: Container(
-                    width: 18, height: 18,
+                    width: 34, height: 34,
                     decoration: BoxDecoration(
                       color: _kBorderAlarm.withOpacity(0.25),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.close,
-                        size: 11, color: Color(0xFFFF8888)),
+                        size: 22, color: Color(0xFFFF8888)),
                   ),
                 ),
               ),
@@ -221,26 +221,13 @@ class _DetectorTileState extends State<DetectorTile>
               ),
             ),
 
-            // Type + ID — bottom left
+            // Тип — bottom left (ID показывается только в программировании)
             Positioned(
               bottom: 5, left: 8,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${widget.detector.name} LoRa',
-                    style: TextStyle(
-                        fontSize: 8, color: c.tileTextDim, letterSpacing: 0.2),
-                  ),
-                  Text(
-                    widget.detector.id,
-                    style: TextStyle(
-                      fontSize: 8, fontFamily: 'monospace',
-                      color: c.tileTextDim,
-                    ),
-                  ),
-                ],
+              child: Text(
+                '${widget.detector.name} LoRa',
+                style: TextStyle(
+                    fontSize: 8, color: c.tileTextDim, letterSpacing: 0.2),
               ),
             ),
 

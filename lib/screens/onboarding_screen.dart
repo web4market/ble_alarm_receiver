@@ -258,3 +258,111 @@ class _PrimaryButton extends StatelessWidget {
     );
   }
 }
+
+// ── Проверка пин-кода (выключение звука, программирование извещателей и т.п.) ─
+
+/// Запрашивает пин-код, заданный при первом запуске. true — пин-код верный.
+/// Контроллер поля принадлежит самому диалогу и освобождается вместе с ним —
+/// иначе при закрытии (во время анимации) приложение падало.
+Future<bool> showPinCheckDialog(
+  BuildContext context, {
+  required String title,
+  String? message,
+  String okLabel = 'OK',
+  bool destructive = false,
+}) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (_) => _PinCheckDialog(
+      title: title,
+      message: message,
+      okLabel: okLabel,
+      destructive: destructive,
+      checkPin: context.read<SettingsProvider>().checkPin,
+    ),
+  );
+  return ok == true;
+}
+
+class _PinCheckDialog extends StatefulWidget {
+  final String title;
+  final String? message;
+  final String okLabel;
+  final bool destructive;
+  final bool Function(String) checkPin;
+
+  const _PinCheckDialog({
+    required this.title,
+    required this.message,
+    required this.okLabel,
+    required this.destructive,
+    required this.checkPin,
+  });
+
+  @override
+  State<_PinCheckDialog> createState() => _PinCheckDialogState();
+}
+
+class _PinCheckDialogState extends State<_PinCheckDialog> {
+  final _ctrl = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (widget.checkPin(_ctrl.text)) {
+      Navigator.pop(context, true);
+    } else {
+      setState(() => _error = 'Неверный пин-код');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    return AlertDialog(
+      backgroundColor: c.surface,
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.message != null) ...[
+                Text(widget.message!,
+                    style: TextStyle(fontSize: 12, color: c.text2)),
+                const SizedBox(height: 14),
+              ],
+              PinField(
+                  controller: _ctrl,
+                  label: 'Пин-код',
+                  autofocus: true,
+                  onSubmitted: (_) => _submit()),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!,
+                    style: const TextStyle(fontSize: 12, color: kAccRed)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена')),
+        TextButton(
+            onPressed: _submit,
+            child: Text(widget.okLabel,
+                style: widget.destructive
+                    ? const TextStyle(color: kAccRed)
+                    : null)),
+      ],
+    );
+  }
+}

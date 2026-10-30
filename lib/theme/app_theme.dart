@@ -7,6 +7,17 @@ const kAccRed   = Color(0xFFEA4335);
 const kAccAmber = Color(0xFFFBBC04);
 const kAccGold  = Color(0xFFD4AF37); // логотип ZHURIN ELECTRONICS
 
+// ── Базовый размер шрифта ─────────────────────────────────────────────────────
+// Все шрифты приложения привязаны к этой одной величине: она применяется ко
+// всему приложению в MaterialApp.builder (main.dart) и умножает каждый
+// fontSize. Пользовательский масштаб из настроек (100–200%) умножается на неё.
+// 1.0 — исходные размеры; 2.0 — всё в 2 раза крупнее.
+const double kBaseFontScale = 2.0;
+
+/// Итоговый множитель шрифта = базовая величина × масштаб из настроек
+TextScaler appTextScaler(double userScale) =>
+    TextScaler.linear(kBaseFontScale * userScale);
+
 // ── Custom colour tokens ──────────────────────────────────────────────────────
 
 @immutable

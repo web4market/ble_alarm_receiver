@@ -13,6 +13,7 @@ import '../screens/help_screen.dart';
 import '../theme/app_theme.dart';
 import '../services/app_foreground.dart';
 import '../services/database_service.dart';
+import 'onboarding_screen.dart';
 import '../widgets/export_sheet.dart';
 import '../widgets/detector_tile.dart';
 
@@ -47,6 +48,9 @@ class _MainScreenState extends State<MainScreen> {
   // приложение само переподключается при любой потере связи.
   Future<void> _autoConnectSavedDevice() async {
     final receiver = context.read<ReceiverProvider>();
+    // Устройство, найденное автопоиском, показываем и в настройках
+    receiver.onPrimaryDeviceSaved =
+        context.read<SettingsProvider>().setPrimaryDevice;
     await receiver.requestPermissions();
     receiver.startAutoReconnect();
     await _askOverlayPermissionOnce();
@@ -94,10 +98,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return Consumer2<ReceiverProvider, SettingsProvider>(
-      builder: (ctx, prov, settings, _) => MediaQuery(
-        data: MediaQuery.of(ctx).copyWith(
-            textScaler: TextScaler.linear(settings.fontScale)),
-        child: Scaffold(
+      builder: (ctx, prov, settings, _) => Scaffold(
           backgroundColor: appColors(ctx).page,
           body: SafeArea(
             child: Column(
@@ -105,6 +106,7 @@ class _MainScreenState extends State<MainScreen> {
                 _TopBar(
                   provider: prov,
                   onConnect: () => _showConnectionDialog(ctx, prov),
+                  onSound: () => _toggleSound(ctx, prov),
                   onHelp: () => Navigator.push(ctx,
                       MaterialPageRoute(builder: (_) => const HelpScreen())),
                   onSettings: () => Navigator.push(ctx,
@@ -129,7 +131,6 @@ class _MainScreenState extends State<MainScreen> {
             ],
           ),
         ),
-      ),
       ),
     );
   }
@@ -217,6 +218,18 @@ class _MainScreenState extends State<MainScreen> {
     if (n <= 6)  return 3;
     if (n <= 12) return 4;
     return 5;
+  }
+
+  // ── Звук: выключение только по пин-коду, включение — без него ─────────────
+
+  Future<void> _toggleSound(BuildContext ctx, ReceiverProvider prov) async {
+    if (prov.soundEnabled) {
+      final ok = await showPinCheckDialog(ctx,
+          title: 'Выключить звук',
+          message: 'Звук тревоги и сигналов будет выключен. Введите пин-код.');
+      if (!ok) return;
+    }
+    prov.toggleSound();
   }
 
   // ── Connection dialog ─────────────────────────────────────────────────────
@@ -354,16 +367,23 @@ class _ClockTextState extends State<_ClockText> {
 }
 
 // ── Top Bar ───────────────────────────────────────────────────────────────────
+// Слева: логотип, дата и время. Справа: ВКЛ/ВЫКЛ ВСЕ, питание, СВЯЗЬ, ЗВУК,
+// справка и настройки. Счётчики «ТРЕВОГА»/«ОХРАНА» — в нижней строке.
+
+const _kBtLostRed = Color(0xFFFF1744); // кнопка «СВЯЗЬ» при потере связи
+const double _kTopBlockHeight = 40;    // высота блоков верхней строки (и логотипа)
 
 class _TopBar extends StatelessWidget {
   final ReceiverProvider provider;
   final VoidCallback onConnect;
+  final VoidCallback onSound;
   final VoidCallback onHelp;
   final VoidCallback onSettings;
 
   const _TopBar({
     required this.provider,
     required this.onConnect,
+    required this.onSound,
     required this.onHelp,
     required this.onSettings,
   });
@@ -371,141 +391,242 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = appColors(context);
+    final soundOn = provider.soundEnabled;
+    final armed = provider.systemArmed;
+    final btColor = provider.btLost
+        ? _kBtLostRed
+        : provider.isConnected
+            ? _kAccBlue
+            : c.text2;
+
     return Container(
-      height: 50,
       color: c.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(children: [
-        // Logo
-        Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('ZHURIN',
+        // Левая группа: логотип, дата и время
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Image.asset('assets/images/logo145x80.png',
+                  height: _kTopBlockHeight, fit: BoxFit.contain),
+              const SizedBox(width: 14),
+              const _ClockText(
+                format: 'dd.MM.yyyy  HH:mm:ss',
                 style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w900,
-                    color: kAccGold, letterSpacing: 2.5, height: 1)),
-            Text('ELECTRONICS',
-                style: TextStyle(
-                    fontSize: 7, color: kAccGold,
-                    letterSpacing: 1.8, height: 1)),
-          ],
+                    fontFamily: 'monospace', fontSize: 22,
+                    fontWeight: FontWeight.w700, color: _kAccBlue,
+                    letterSpacing: 0),
+              ),
+            ]),
+          ),
         ),
-        Container(
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            width: 1, height: 30, color: c.border),
-
-        // Status chips
-        _chip(context, 'ТРЕВОГА', provider.alarmDetectors,    _kAccRed),
-        const SizedBox(width: 5),
-        _chip(context, 'НОРМА',   _normalCount,                _kAccGreen),
-        const SizedBox(width: 5),
-        _chip(context, 'ОХРАНА',  _armedCount,                 _kAccBlue.withOpacity(0.9)),
-        const SizedBox(width: 5),
-        _chip(context, 'НЕТ СВ.', provider.offlineDetectors,  c.text2),
-
-        const Spacer(),
-
-        // Clock — isolated widget, rebuilds only itself
-        const _ClockText(
-          format: 'HH:mm:ss',
-          style: TextStyle(
-              fontFamily: 'monospace', fontSize: 22,
-              fontWeight: FontWeight.w700, color: _kAccBlue, letterSpacing: 2.5),
-        ),
-
-        const SizedBox(width: 16),
-
-        // Sound toggle
-        _iconBtn(
-          provider.soundEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-          provider.soundEnabled ? _kAccBlue : c.text2,
-          provider.toggleSound,
-        ),
-
-        // Arm / disarm all
-        GestureDetector(
-          onTap: () {
-            final allArmed = provider.detectors.every((d) => d.isArmed);
-            if (allArmed) provider.disarmAll(); else provider.armAll();
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            decoration: BoxDecoration(
-              color: _armedAll
-                  ? const Color(0xFF1A4A1A)
-                  : const Color(0xFF4A1A1A),
-              border: Border.all(
-                  color: _armedAll
-                      ? const Color(0xFF2A7A2A)
-                      : const Color(0xFF7A2A2A)),
-              borderRadius: BorderRadius.circular(3),
-            ),
-            child: Text(
-              _armedAll ? '🔒  ОХРАНА' : '🔓  СНЯТО',
-              style: TextStyle(fontSize: 10, letterSpacing: 0.5,
-                  color: c.text1),
+        const SizedBox(width: 14),
+        // Правая группа: кнопки (при нехватке ширины обе группы ужимаются)
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                // Охрана всей системы: нажатие переключает ВКЛ ВСЕ ↔ ВЫКЛ ВСЕ
+                _TopBtn(
+                  label: armed ? 'ВКЛ ВСЕ' : 'ВЫКЛ ВСЕ',
+                  icon: armed ? Icons.lock_rounded : Icons.lock_open_rounded,
+                  color: armed ? _kAccGreen : _kAccRed,
+                  onTap: armed ? provider.disarmAll : provider.armAll,
+                ),
+                const SizedBox(width: 6),
+                _PowerBlock(provider: provider),
+                const SizedBox(width: 6),
+                _TopBtn(
+                  label: 'СВЯЗЬ',
+                  icon: provider.isConnected
+                      ? Icons.bluetooth_connected
+                      : Icons.bluetooth_disabled,
+                  color: btColor,
+                  filled: provider.btLost,
+                  onTap: onConnect,
+                ),
+                const SizedBox(width: 6),
+                _TopBtn(
+                  label: 'ЗВУК',
+                  icon: soundOn
+                      ? Icons.volume_up_rounded
+                      : Icons.volume_off_rounded,
+                  color: soundOn ? _kAccBlue : _kAccAmber,
+                  onTap: onSound,
+                ),
+              ]),
             ),
           ),
         ),
-
-        // BLE button
-        _iconBtn(
-          provider.isConnected
-              ? Icons.bluetooth_connected
-              : Icons.bluetooth_disabled,
-          provider.isConnected ? _kAccBlue : Colors.grey,
-          onConnect,
-        ),
-
-        // Help button
+        const SizedBox(width: 8),
+        // Справка и настройки
         _iconBtn(Icons.help_outline, c.text2, onHelp),
-
-        // Settings button
         _iconBtn(Icons.settings_outlined, c.text2, onSettings),
-      ]),
-    );
-  }
-
-  int get _normalCount => provider.detectors
-      .where((d) => d.status == DetectorStatus.normal && d.isArmed)
-      .length;
-  int get _armedCount  => provider.detectors.where((d) => d.isArmed).length;
-  bool get _armedAll   => provider.detectors.isNotEmpty &&
-      provider.detectors.every((d) => d.isArmed);
-
-  Widget _chip(BuildContext ctx, String label, int count, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        border: Border.all(color: color.withOpacity(0.45)),
-        borderRadius: BorderRadius.circular(3),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-            width: 5, height: 5,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 5),
-        Text(label,
-            style: TextStyle(
-                fontSize: 8, color: color, letterSpacing: 0.4)),
-        const SizedBox(width: 4),
-        Text('$count',
-            style: TextStyle(
-                fontSize: 11, color: color, fontWeight: FontWeight.w800)),
       ]),
     );
   }
 
   Widget _iconBtn(IconData icon, Color color, VoidCallback onTap) {
     return IconButton(
-      icon: Icon(icon, size: 18, color: color),
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      icon: Icon(icon, size: 30, color: color),
+      padding: const EdgeInsets.all(4),
+      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
       onPressed: onTap,
     );
+  }
+}
+
+// Кнопка верхней панели: пиктограмма + подпись
+class _TopBtn extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool filled; // залить цветом (например, потеря связи — ярко-красный)
+  final VoidCallback? onTap;
+
+  const _TopBtn({
+    required this.label,
+    required this.icon,
+    required this.color,
+    this.filled = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = filled ? Colors.white : color;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        height: _kTopBlockHeight,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: filled ? color : color.withOpacity(0.12),
+          border: Border.all(color: filled ? color : color.withOpacity(0.55)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 26, color: fg),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6, color: fg)),
+        ]),
+      ),
+    );
+  }
+}
+
+// Блок «ПИТАНИЕ»: от сети или от аккумулятора, уровень и зарядка.
+// На аккумуляторе блок пульсирует (и раз в минуту звучит сигнал — в провайдере).
+class _PowerBlock extends StatefulWidget {
+  final ReceiverProvider provider;
+  const _PowerBlock({required this.provider});
+
+  @override
+  State<_PowerBlock> createState() => _PowerBlockState();
+}
+
+class _PowerBlockState extends State<_PowerBlock>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900));
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(_PowerBlock old) {
+    super.didUpdateWidget(old);
+    _sync();
+  }
+
+  void _sync() {
+    final onBattery = widget.provider.onExternalPower == false;
+    if (onBattery && !_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    } else if (!onBattery && _pulse.isAnimating) {
+      _pulse.stop();
+      _pulse.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    final p = widget.provider;
+    final external = p.onExternalPower;
+    final level = p.tabletBatteryLevel;
+
+    final Color color;
+    final IconData icon;
+    final String label; // ЗАРЯД — от сети, РАЗРЯД — от аккумулятора
+    if (external == null) {
+      color = c.text2;
+      icon = Icons.battery_unknown;
+      label = '—';
+    } else if (external) {
+      color = _kAccGreen;
+      icon = Icons.battery_charging_full;
+      label = 'ЗАРЯД';
+    } else {
+      color = (level ?? 100) <= 20 ? _kAccRed : _kAccAmber;
+      icon = _batteryIcon(level);
+      label = 'РАЗРЯД';
+    }
+
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (_, __) {
+        final t = _pulse.value; // 0..1 — только при работе от аккумулятора
+        return Container(
+          height: _kTopBlockHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: Color.lerp(color.withOpacity(0.12), color.withOpacity(0.55), t),
+            border: Border.all(color: color.withOpacity(0.55 + 0.45 * t)),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 26, color: color),
+            const SizedBox(width: 6),
+            Text(level != null ? '$level%' : '—',
+                style: TextStyle(
+                    fontSize: 10, fontWeight: FontWeight.w700, color: c.text1)),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 10, fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6, color: color)),
+          ]),
+        );
+      },
+    );
+  }
+
+  static IconData _batteryIcon(int? level) {
+    if (level == null) return Icons.battery_unknown;
+    if (level <= 10) return Icons.battery_alert;
+    if (level <= 30) return Icons.battery_2_bar;
+    if (level <= 60) return Icons.battery_4_bar;
+    if (level <= 85) return Icons.battery_5_bar;
+    return Icons.battery_full;
   }
 }
 
@@ -532,14 +653,14 @@ class _RightPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = appColors(context);
     return Container(
-      width: 290,
+      width: 336, // правая панель (журнал)
       decoration: BoxDecoration(
         color: c.surface,
         border: Border(left: BorderSide(color: c.border)),
       ),
       child: Column(children: [
-        // Header
-        _panelHeader(context),
+        // Закрыть карточку выбранного извещателя
+        if (selectedId != null) _panelHeader(context),
         // Detector detail
         if (_selected != null) ...[
           _DetectorDetail(
@@ -577,16 +698,11 @@ class _RightPanel extends StatelessWidget {
       decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: c.border))),
       child: Row(children: [
-        Text('ПАНЕЛЬ',
-            style: TextStyle(
-                fontSize: 9, fontWeight: FontWeight.w700,
-                letterSpacing: 1.8, color: c.text2)),
         const Spacer(),
-        if (selectedId != null)
-          GestureDetector(
-            onTap: onClose,
-            child: Icon(Icons.close_rounded, size: 14, color: c.text2),
-          ),
+        GestureDetector(
+          onTap: onClose,
+          child: Icon(Icons.close_rounded, size: 26, color: c.text2),
+        ),
       ]),
     );
   }
@@ -636,7 +752,7 @@ class _DetectorDetail extends StatelessWidget {
           Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('${detector.name}  [${detector.id}]',
+              Text('№${detector.slot}  ${detector.name}',
                   style: TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w700,
                       color: c.text1),
@@ -651,7 +767,7 @@ class _DetectorDetail extends StatelessWidget {
         _row(c, 'Зона',    zoneName),
         _row(c, 'Место',   detector.place.isEmpty ? '—' : detector.place),
         _row(c, 'Событие', detector.lastEventText),
-        _row(c, 'Связь',   _ago(detector.lastSeen)),
+        _row(c, 'Сигнал',  _ago(detector.lastSeen)),
         _row(c, 'Тревог',  '${detector.alarmCount}'),
         const SizedBox(height: 10),
         Row(children: [
@@ -676,7 +792,7 @@ class _DetectorDetail extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(children: [
         SizedBox(
-            width: 58,
+            width: 120,
             child: Text(label,
                 style: TextStyle(fontSize: 9, color: c.text2))),
         Expanded(
@@ -744,7 +860,7 @@ class _EventLog extends StatelessWidget {
           GestureDetector(
             onTap: events.isEmpty ? null : () => ExportSheet.show(context),
             child: Icon(Icons.share_outlined,
-                size: 15,
+                size: 26,
                 color: events.isEmpty ? c.text2.withOpacity(0.3) : c.text2),
           ),
         ]),
@@ -778,9 +894,12 @@ class _EventRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: c.eventRowDivider, width: 0.5))),
-      child: Row(children: [
+      // Строка события переносится целиком; полоска слева — на всю высоту
+      child: IntrinsicHeight(child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
         Container(
-          width: 3, height: 28,
+          width: 4,
           decoration: BoxDecoration(
               color: color, borderRadius: BorderRadius.circular(2)),
         ),
@@ -790,14 +909,16 @@ class _EventRow extends StatelessWidget {
           children: [
             Text(event.description,
                 style: TextStyle(fontSize: 10, color: c.text1),
-                overflow: TextOverflow.ellipsis),
+                softWrap: true),
             Text(
               DateFormat('dd.MM.yyyy  HH:mm:ss').format(event.timestamp),
               style: TextStyle(fontSize: 8, color: c.text2),
             ),
           ],
         )),
-        Container(
+        Align(
+          alignment: Alignment.topRight,
+          child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           decoration: BoxDecoration(
             color: color.withOpacity(0.15),
@@ -806,8 +927,8 @@ class _EventRow extends StatelessWidget {
           child: Text(_short(event.type),
               style: TextStyle(
                   fontSize: 8, color: color, fontWeight: FontWeight.w700)),
-        ),
-      ]),
+        )),
+      ])),
     );
   }
 
@@ -833,6 +954,8 @@ class _EventRow extends StatelessWidget {
       case EventType.btAdapterOff:  return 'BTx';
       case EventType.btAdapterOn:   return 'BTv';
       case EventType.tabletBatteryLow: return 'П-БАТ';
+      case EventType.powerLost:     return 'ПИТ-';
+      case EventType.powerRestored: return 'ПИТ+';
     }
   }
 }
@@ -847,8 +970,7 @@ class _BottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = appColors(context);
     return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
           color: c.page,
           border: Border(top: BorderSide(color: c.border))),
@@ -866,27 +988,38 @@ class _BottomBar extends StatelessWidget {
         _item(Icons.sensors_rounded,
             '${provider.totalDetectors} датч.', c.text2),
         _div(c),
-        _item(Icons.warning_amber_rounded,
-            '${provider.alarmDetectors} тревог',
+        _chip('ТРЕВОГА', provider.alarmDetectors,
             provider.alarmDetectors > 0 ? _kAccRed : c.text2),
-        _div(c),
-        _item(Icons.no_photography_outlined,
-            '${provider.offlineDetectors} нет св.', c.text2),
+        const SizedBox(width: 6),
+        _chip('ОХРАНА',
+            provider.detectors.where((d) => d.isArmed).length, _kAccBlue),
         const Spacer(),
-        _ClockText(
-          format: 'dd.MM.yyyy',
-          style: TextStyle(fontSize: 9, color: c.text2),
-        ),
       ]),
     );
   }
 
   Widget _item(IconData icon, String label, Color color) {
     return Row(children: [
-      Icon(icon, size: 11, color: color),
+      Icon(icon, size: 20, color: color),
       const SizedBox(width: 4),
       Text(label, style: TextStyle(fontSize: 9, color: color)),
     ]);
+  }
+
+  // Компактный счётчик (перенесён из верхней строки)
+  Widget _chip(String label, int count, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        border: Border.all(color: color.withOpacity(0.45)),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Text('$label $count',
+          style: TextStyle(
+              fontSize: 8, color: color, fontWeight: FontWeight.w700,
+              letterSpacing: 0.4)),
+    );
   }
 
   Widget _div(AppColors c) => Container(

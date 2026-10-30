@@ -260,6 +260,8 @@ class ExportService {
         EventType.btAdapterOff   => 'BT выключен',
         EventType.btAdapterOn    => 'BT включён',
         EventType.tabletBatteryLow => 'Разряд планшета',
+        EventType.powerLost      => 'Нет питания',
+        EventType.powerRestored  => 'Питание есть',
       };
 
   PdfColor _pdfColor(EventType t) => switch (t) {
@@ -283,6 +285,8 @@ class ExportService {
         EventType.btAdapterOff   => const PdfColor.fromInt(0xFFEA4335),
         EventType.btManualDisconnect => PdfColors.grey600,
         EventType.tabletBatteryLow => const PdfColor.fromInt(0xFFFF9800),
+        EventType.powerLost      => const PdfColor.fromInt(0xFFEA4335),
+        EventType.powerRestored  => const PdfColor.fromInt(0xFF34A853),
       };
 
   pw.Widget _kv(String k, String v,

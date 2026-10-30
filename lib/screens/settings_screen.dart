@@ -191,61 +191,16 @@ class SettingsScreen extends StatelessWidget {
   // Сброс до заводских установок — только после ввода пин-кода, заданного
   // при первом запуске. После сброса приложение начинает с выбора языка.
   Future<void> _factoryReset(BuildContext context) async {
-    final c = appColors(context);
     final settings = context.read<SettingsProvider>();
     final receiver = context.read<ReceiverProvider>();
-    final pinCtrl = TextEditingController();
-    String? error;
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dCtx) => StatefulBuilder(
-        builder: (dCtx, setState) {
-          void submit() {
-            if (settings.checkPin(pinCtrl.text)) {
-              Navigator.pop(dCtx, true);
-            } else {
-              setState(() => error = 'Неверный пин-код');
-            }
-          }
-
-          return AlertDialog(
-            backgroundColor: c.surface,
-            title: const Text('Сброс до заводских установок'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                    'Будут удалены все извещатели, журнал событий, выбранное '
-                    'BT-устройство и настройки. Введите пин-код для подтверждения.',
-                    style: TextStyle(fontSize: 12, color: c.text2)),
-                const SizedBox(height: 16),
-                PinField(
-                    controller: pinCtrl,
-                    label: 'Пин-код',
-                    autofocus: true,
-                    onSubmitted: (_) => submit()),
-                if (error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(error!,
-                      style: const TextStyle(fontSize: 12, color: _kAccRed)),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(dCtx, false),
-                  child: const Text('Отмена')),
-              TextButton(
-                  onPressed: submit,
-                  child: const Text('Сбросить',
-                      style: TextStyle(color: _kAccRed))),
-            ],
-          );
-        },
-      ),
+    final ok = await showPinCheckDialog(
+      context,
+      title: 'Сброс до заводских установок',
+      message: 'Будут удалены все извещатели, журнал событий, выбранное '
+          'BT-устройство и настройки. Введите пин-код для подтверждения.',
+      okLabel: 'Сбросить',
+      destructive: true,
     );
-    pinCtrl.dispose();
     if (ok != true || !context.mounted) return;
 
     await receiver.factoryReset();
@@ -314,7 +269,7 @@ class ScreenSettingsPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Масштабирует весь текст на главном экране',
+                      'Масштабирует весь текст приложения. 100% — по умолчанию',
                       style: TextStyle(fontSize: 11, color: c.text2),
                     ),
                     const SizedBox(height: 16),
@@ -334,7 +289,7 @@ class ScreenSettingsPage extends StatelessWidget {
                         value: scale,
                         min: SettingsProvider.minFontScale,
                         max: SettingsProvider.maxFontScale,
-                        divisions: 10,
+                        divisions: 10, // шаг 10%
                         onChanged: settings.setFontScale,
                       ),
                     ),
@@ -344,15 +299,18 @@ class ScreenSettingsPage extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         _stepBtn(ctx, '−', () => settings.setFontScale(scale - 0.1)),
-                        Row(children: [
+                        // Пресеты ужимаются, если не помещаются (крупный шрифт)
+                        Flexible(child: FittedBox(child: Row(children: [
+                          _presetBtn(ctx, '50%',  0.5, scale, settings),
+                          const SizedBox(width: 6),
+                          _presetBtn(ctx, '75%',  0.75, scale, settings),
+                          const SizedBox(width: 6),
                           _presetBtn(ctx, '100%', 1.0, scale, settings),
                           const SizedBox(width: 6),
-                          _presetBtn(ctx, '130%', 1.3, scale, settings),
+                          _presetBtn(ctx, '125%', 1.25, scale, settings),
                           const SizedBox(width: 6),
-                          _presetBtn(ctx, '160%', 1.6, scale, settings),
-                          const SizedBox(width: 6),
-                          _presetBtn(ctx, '200%', 2.0, scale, settings),
-                        ]),
+                          _presetBtn(ctx, '150%', 1.5, scale, settings),
+                        ]))),
                         _stepBtn(ctx, '+', () => settings.setFontScale(scale + 0.1)),
                       ],
                     ),
@@ -368,7 +326,7 @@ class ScreenSettingsPage extends StatelessWidget {
                 padding: const EdgeInsets.all(16),
                 child: MediaQuery(
                   data: MediaQuery.of(ctx)
-                      .copyWith(textScaler: TextScaler.linear(scale)),
+                      .copyWith(textScaler: appTextScaler(scale)),
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -832,7 +790,13 @@ class SoundSettingsPage extends StatelessWidget {
                       title: 'Звук тревоги',
                       subtitle: 'Сирена при событии тревоги (код 0x55)',
                       value: receiver.soundEnabled,
-                      onChanged: (_) => receiver.toggleSound(),
+                      onChanged: (on) async {
+                        // Выключение — только по пин-коду
+                        if (!on &&
+                            !await showPinCheckDialog(ctx,
+                                title: 'Выключить звук')) return;
+                        receiver.setSoundEnabled(on);
+                      },
                     ),
                   ],
                 ),

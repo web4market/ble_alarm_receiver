@@ -29,6 +29,12 @@ class MyApp extends StatelessWidget {
           theme:      AppTheme.light(),
           darkTheme:  AppTheme.dark(),
           themeMode:  settings.themeMode,
+          // Единый масштаб шрифта для всего приложения (см. kBaseFontScale)
+          builder: (ctx, child) => MediaQuery(
+            data: MediaQuery.of(ctx)
+                .copyWith(textScaler: appTextScaler(settings.fontScale)),
+            child: child!,
+          ),
           // Первый запуск: выбор языка → ввод пин-кода → главный экран.
           // После сброса до заводских установок снова попадаем сюда.
           home: !settings.isLoaded
