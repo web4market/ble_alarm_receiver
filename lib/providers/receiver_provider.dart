@@ -10,6 +10,8 @@ import '../services/audio_service.dart';
 import '../services/api_sync_service.dart';
 import '../services/app_foreground.dart';
 
+enum ArmState { all, none, partial }
+
 class ReceiverProvider extends ChangeNotifier {
   bool _isScanning = false;
   bool _isConnected = false;
@@ -138,6 +140,16 @@ class ReceiverProvider extends ChangeNotifier {
   bool get btLost => _btLost;
   /// Система на охране (кнопка «ВКЛ ВСЕ» / «ВЫКЛ ВСЕ»), хранится в settings
   bool get systemArmed => _systemArmed;
+
+  /// Состояние охраны для кнопки верхней строки: все извещатели на охране,
+  /// все сняты или часть снята. Без извещателей — по сохранённому systemArmed.
+  ArmState get armState {
+    if (_detectors.isEmpty) return _systemArmed ? ArmState.all : ArmState.none;
+    final armed = _detectors.where((d) => d.isArmed).length;
+    if (armed == _detectors.length) return ArmState.all;
+    if (armed == 0) return ArmState.none;
+    return ArmState.partial;
+  }
   int? get tabletBatteryLevel => _batteryLevel;
   /// null — состояние ещё неизвестно
   bool? get onExternalPower =>
@@ -1056,7 +1068,8 @@ class ReceiverProvider extends ChangeNotifier {
     final slot = _programmingSlot ?? _firstFreeSlot();
     final det = DetectorModel.fromPacket(pkt).copyWith(
       status: DetectorStatus.normal,
-      lastEventCode: 0xAA,
+      // последнее, что прислал извещатель, — пакет инициализации
+      lastEventCode: DetectorModel.initCode,
       slot: slot,
     );
     _detectors.add(det);
@@ -1385,6 +1398,58 @@ class ReceiverProvider extends ChangeNotifier {
           '${zoneName(zone)} снята с охраны (${zoneDetectors.length} извещателей)',
     ));
 
+    notifyListeners();
+  }
+
+  // ── Зоны по названию (кнопки зон в нижней строке главного экрана) ──────
+  // Зона — название, введённое при программировании (`DetectorModel.zoneName`).
+
+  // Извещатели зоны (название без учёта регистра, как в knownZoneNames)
+  List<DetectorModel> _zoneDetectors(String zone) {
+    final z = zone.trim().toLowerCase();
+    return _detectors.where((d) => d.zoneName.trim().toLowerCase() == z).toList();
+  }
+
+  /// Состояние охраны зоны: все её извещатели на охране / все сняты / часть
+  ArmState zoneArmState(String zone) {
+    final list = _zoneDetectors(zone);
+    final armed = list.where((d) => d.isArmed).length;
+    if (list.isNotEmpty && armed == list.length) return ArmState.all;
+    if (armed == 0) return ArmState.none;
+    return ArmState.partial;
+  }
+
+  /// Поставить на охрану / снять с охраны все извещатели зоны
+  Future<void> setZoneArmed(String zone, bool armed) async {
+    final list = _zoneDetectors(zone);
+    if (list.isEmpty) return;
+    for (final d in list) {
+      if (d.isArmed != armed) {
+        d.isArmed = armed;
+        await _db.updateDetectorArmed(d.id, armed);
+      }
+      // Снятие сбрасывает тревоги извещателей зоны
+      if (!armed && d.status == DetectorStatus.alarm) {
+        d.status = DetectorStatus.normal;
+        _alarmBorderActive.remove(d.id);
+        _alarmStartTimes.remove(d.id);
+      }
+    }
+    if (!armed && _alarmBorderActive.isEmpty) {
+      _audio.stop();
+      AppForeground.releaseLockScreen();
+    }
+
+    _addEvent(EventModel(
+      timestamp: DateTime.now(),
+      type: armed ? EventType.zoneArmed : EventType.zoneDisarmed,
+      detectorId: 'zone',
+      detectorName: zone,
+      description: armed
+          ? 'Зона «$zone» поставлена на охрану (${list.length} извещ.)'
+          : 'Зона «$zone» снята с охраны (${list.length} извещ.)',
+      zoneName: zone,
+    ));
     notifyListeners();
   }
 

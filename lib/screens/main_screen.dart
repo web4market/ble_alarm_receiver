@@ -392,7 +392,7 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = appColors(context);
     final soundOn = provider.soundEnabled;
-    final armed = provider.systemArmed;
+    final arm = provider.armState;
     final btColor = provider.btLost
         ? _kBtLostRed
         : provider.isConnected
@@ -431,12 +431,23 @@ class _TopBar extends StatelessWidget {
               fit: BoxFit.scaleDown,
               alignment: Alignment.centerRight,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                // Охрана всей системы: нажатие переключает ВКЛ ВСЕ ↔ ВЫКЛ ВСЕ
+                // Охрана всей системы:
+                //  все на охране — зелёная «ВКЛ ВСЕ», нажатие снимает все;
+                //  все сняты — красная «ВЫКЛ ВСЕ», нажатие ставит все;
+                //  часть снята — серая «ВКЛ ВСЕ», нажатие ставит все на охрану
                 _TopBtn(
-                  label: armed ? 'ВКЛ ВСЕ' : 'ВЫКЛ ВСЕ',
-                  icon: armed ? Icons.lock_rounded : Icons.lock_open_rounded,
-                  color: armed ? _kAccGreen : _kAccRed,
-                  onTap: armed ? provider.disarmAll : provider.armAll,
+                  label: arm == ArmState.none ? 'ВЫКЛ ВСЕ' : 'ВКЛ ВСЕ',
+                  icon: arm == ArmState.all
+                      ? Icons.lock_rounded
+                      : Icons.lock_open_rounded,
+                  color: switch (arm) {
+                    ArmState.all => _kAccGreen,
+                    ArmState.none => _kAccRed,
+                    ArmState.partial => c.text2,
+                  },
+                  onTap: arm == ArmState.all
+                      ? provider.disarmAll
+                      : provider.armAll,
                 ),
                 const SizedBox(width: 6),
                 _PowerBlock(provider: provider),
@@ -962,6 +973,9 @@ class _EventRow extends StatelessWidget {
 
 // ── Bottom Bar ────────────────────────────────────────────────────────────────
 
+// Единая высота блоков нижней строки (связь, счётчики, кнопки зон)
+const double _kBottomBlockHeight = 30;
+
 class _BottomBar extends StatelessWidget {
   final ReceiverProvider provider;
   const _BottomBar({required this.provider});
@@ -993,27 +1007,49 @@ class _BottomBar extends StatelessWidget {
         const SizedBox(width: 6),
         _chip('ОХРАНА',
             provider.detectors.where((d) => d.isArmed).length, _kAccBlue),
-        const Spacer(),
+        _div(c),
+        // Кнопки зон: нажатие ставит всю зону на охрану или снимает
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              for (final zone in provider.knownZoneNames) ...[
+                _ZoneButton(
+                  zone: zone,
+                  state: provider.zoneArmState(zone),
+                  onTap: () => provider.setZoneArmed(
+                      zone, provider.zoneArmState(zone) != ArmState.all),
+                ),
+                const SizedBox(width: 6),
+              ],
+            ]),
+          ),
+        ),
       ]),
     );
   }
 
   Widget _item(IconData icon, String label, Color color) {
-    return Row(children: [
-      Icon(icon, size: 20, color: color),
-      const SizedBox(width: 4),
-      Text(label, style: TextStyle(fontSize: 9, color: color)),
-    ]);
+    return SizedBox(
+      height: _kBottomBlockHeight,
+      child: Row(children: [
+        Icon(icon, size: 20, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 9, color: color)),
+      ]),
+    );
   }
 
   // Компактный счётчик (перенесён из верхней строки)
   Widget _chip(String label, int count, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      height: _kBottomBlockHeight,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: color.withOpacity(0.12),
         border: Border.all(color: color.withOpacity(0.45)),
-        borderRadius: BorderRadius.circular(3),
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Text('$label $count',
           style: TextStyle(
@@ -1025,6 +1061,48 @@ class _BottomBar extends StatelessWidget {
   Widget _div(AppColors c) => Container(
       margin: const EdgeInsets.symmetric(horizontal: 10),
       width: 1, height: 12, color: c.border);
+}
+
+// Кнопка зоны в нижней строке:
+// зелёная — вся зона на охране (нажатие снимает), красная — вся снята,
+// серая — часть снята (нажатие ставит всю зону на охрану)
+class _ZoneButton extends StatelessWidget {
+  final String zone;
+  final ArmState state;
+  final VoidCallback onTap;
+  const _ZoneButton(
+      {required this.zone, required this.state, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = appColors(context);
+    final color = switch (state) {
+      ArmState.all => _kAccGreen,
+      ArmState.none => _kAccRed,
+      ArmState.partial => c.text2,
+    };
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: _kBottomBlockHeight,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.14),
+          border: Border.all(color: color.withOpacity(0.6)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(state == ArmState.all ? Icons.lock_rounded : Icons.lock_open_rounded,
+              size: 18, color: color),
+          const SizedBox(width: 4),
+          Text(zone,
+              style: TextStyle(
+                  fontSize: 9, fontWeight: FontWeight.w700, color: color)),
+        ]),
+      ),
+    );
+  }
 }
 
 // ── Shared UI helpers ─────────────────────────────────────────────────────────

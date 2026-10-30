@@ -197,7 +197,7 @@ class DetectorModel {
   String get statusText {
     if (!isArmed) return 'Снято';
     switch (status) {
-      case DetectorStatus.normal:    return 'Норма';
+      case DetectorStatus.normal:    return 'На охране';
       case DetectorStatus.alarm:     return 'ТРЕВОГА';
       case DetectorStatus.tamper:    return 'ВСКРЫТИЕ';
       case DetectorStatus.lowBattery:return 'Разряд';
