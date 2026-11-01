@@ -401,7 +401,8 @@ class _TopBar extends StatelessWidget {
 
     return Container(
       color: c.surface,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      // справа без отступа — справка и настройки прижаты к правому краю
+      padding: const EdgeInsets.only(left: 8, top: 6, bottom: 6),
       child: Row(children: [
         // Левая группа: логотип, дата и время
         Flexible(
@@ -474,8 +475,8 @@ class _TopBar extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        // Справка и настройки
+        const SizedBox(width: 6),
+        // Справка и настройки — вплотную к правому краю
         _iconBtn(Icons.help_outline, c.text2, onHelp),
         _iconBtn(Icons.settings_outlined, c.text2, onSettings),
       ]),
@@ -483,10 +484,12 @@ class _TopBar extends StatelessWidget {
   }
 
   Widget _iconBtn(IconData icon, Color color, VoidCallback onTap) {
+    // Значок 30 без внутренних полей; зона касания 40×44
     return IconButton(
       icon: Icon(icon, size: 30, color: color),
-      padding: const EdgeInsets.all(4),
-      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints.tightFor(width: 40, height: 44),
       onPressed: onTap,
     );
   }

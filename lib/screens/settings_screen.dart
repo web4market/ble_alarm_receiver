@@ -1120,6 +1120,19 @@ class _ServerApiBlockState extends State<_ServerApiBlock> {
                         ),
                       ),
                     ]),
+                    // События, которые сервер отклонил (обычно — устаревшая
+                    // версия server_api не знала их тип). После обновления
+                    // сервера их можно отправить заново.
+                    if (context.watch<ApiSyncService>().rejectedCount > 0) ...[
+                      const SizedBox(height: 8),
+                      _BleActionBtn(
+                        label: 'Повторить отклонённые '
+                            '(${context.watch<ApiSyncService>().rejectedCount})',
+                        icon: Icons.replay,
+                        color: kAccAmber,
+                        onTap: ApiSyncService().resendRejected,
+                      ),
+                    ],
                   ],
                 ],
               ),

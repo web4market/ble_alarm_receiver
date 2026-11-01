@@ -18,7 +18,7 @@ L50RA / L60RA / L70RA / V10RA. Целевой дизайн — [design.md](desig
   автопереподключение, состояние адаптера), разбор пакетов, программирование
   извещателей, охрана, журнал, батарея планшета, заводской сброс.
 - `providers/settings_provider.dart` — тема, шрифт, язык, пин-код, основное BT-устройство.
-- `services/database_service.dart` — sqflite (`alarm_receiver.db`, версия схемы 7),
+- `services/database_service.dart` — sqflite (`alarm_receiver.db`, версия схемы 8),
   таблицы `detectors`, `events`, `settings` (key/value), `zones` (устаревшая).
 - `services/api_sync_service.dart` — отправка журнала на сервер (очередь synced=0, пакеты, повторы).
 - `services/app_foreground.dart` + `android/.../MainActivity.kt` — всплытие на передний план при тревоге (SYSTEM_ALERT_WINDOW).
@@ -32,6 +32,8 @@ PHP 8.1+, mysqli, JSON, Bearer-токен. Документация — `server_
 Веб-панель управления планшетами — `public/admin.php` (вход администратора по хэшу из config.php).
 Формат события = поля EventModel + `detectorSlot`, `zoneName`, `place`; `type` — имя
 EventType строкой. Новый EventType нужно добавить и в `EVENT_TYPES` (`server_api/src/handlers.php`).
+Клиент для смартфона — отдельный проект `../api_monitor` (ZH Монитор, читает `GET /events`);
+новый тип события добавить и в его `lib/models/journal_event.dart` (`EventKind.all`).
 
 ## Протокол (6 байт, лишнее отбрасывается)
 `[0-1] ID (hex "0001") · [2] канал = 0xAA · [3] код события · [4] 0x33 · [5] тип узла`

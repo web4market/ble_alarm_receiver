@@ -20,7 +20,7 @@ class DatabaseService {
     String path = join(await getDatabasesPath(), 'alarm_receiver.db');
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -127,6 +127,12 @@ class DatabaseService {
       try { await db.execute("ALTER TABLE events ADD COLUMN place TEXT DEFAULT ''"); } catch (_) {}
       try { await db.execute('ALTER TABLE events ADD COLUMN detectorSlot INTEGER'); } catch (_) {}
       try { await db.execute('ALTER TABLE events ADD COLUMN synced INTEGER DEFAULT 0'); } catch (_) {}
+    }
+    if (oldVersion < 8) {
+      // Разовая повторная отправка: события, отклонённые старой версией
+      // сервера (например, powerLost/powerRestored до обновления server_api),
+      // снова ставятся в очередь. Слишком старые ApiSyncService отсеет сам.
+      try { await db.execute('UPDATE events SET synced = 0 WHERE synced = 2'); } catch (_) {}
     }
   }
 
@@ -339,6 +345,20 @@ class DatabaseService {
       limit: limit,
     );
     return maps.map(EventModel.fromJson).toList();
+  }
+
+  Future<int> countRejectedEvents() async {
+    final db = await database;
+    final r = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM events WHERE synced = ?', [syncRejected]);
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Вернуть отклонённые сервером события в очередь отправки
+  Future<int> requeueRejectedEvents() async {
+    final db = await database;
+    return db.update('events', {'synced': syncPending},
+        where: 'synced = ?', whereArgs: [syncRejected]);
   }
 
   Future<int> countUnsyncedEvents() async {
